@@ -1,0 +1,532 @@
+import React, { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, BackHandler, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { useStore } from '../state/StoreProvider';
+import { useTheme } from '../hooks/useTheme';
+import { useToast } from '../components/ToastProvider';
+import { useSelection } from '../hooks/useSelection';
+import { TabNavigationProp } from '../navigation/types';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { StickerGrid } from '../components/StickerGrid';
+import { EmptyState } from '../components/EmptyState';
+import { SelectionBar } from '../components/SelectionBar';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { CategoryPicker } from '../components/CategoryPicker';
+import { exportStickers } from '../services/shareService';
+import { getChildren, getDescendantIds } from '../utils/category';
+import type { Category as CategoryModel } from '../models/types';
+
+type Props = { navigation: TabNavigationProp<'Categories'> };
+
+export function CategoriesScreen({ navigation }: Props) {
+  const theme = useTheme();
+  const toast = useToast();
+  const {
+    stickers,
+    categories,
+    settings,
+    loaded,
+    touchSticker,
+    deleteStickers,
+    moveStickersToCategory,
+    createCategory,
+    renameCategory,
+    deleteCategory,
+  } = useStore();
+
+  const selection = useSelection();
+  const { selectMode, selectedIds, exitSelection } = selection;
+
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [manageTarget, setManageTarget] = useState<CategoryModel | null>(null);
+  const [renameTarget, setRenameTarget] = useState<CategoryModel | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CategoryModel | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [showRename, setShowRename] = useState(false);
+  const [showDeleteCat, setShowDeleteCat] = useState(false);
+  const [showDeleteStickers, setShowDeleteStickers] = useState(false);
+  const [showCategoryPick, setShowCategoryPick] = useState(false);
+
+  const currentCategory = useMemo(
+    () => categories.find((c) => c.id === currentFolderId) || null,
+    [categories, currentFolderId],
+  );
+
+  const topLevel = useMemo(() => getChildren(categories, null), [categories]);
+  const childFolders = useMemo(
+    () => (currentFolderId ? getChildren(categories, currentFolderId) : []),
+    [categories, currentFolderId],
+  );
+
+  const directStickers = useMemo(
+    () => stickers.filter((s) => s.categoryId === currentFolderId),
+    [stickers, currentFolderId],
+  );
+
+  const selectedStickers = useMemo(
+    () => stickers.filter((s) => selectedIds.has(s.id)),
+    [stickers, selectedIds],
+  );
+
+  const countByCategory = useMemo(() => {
+    const map: Record<string, number> = {};
+    stickers.forEach((s) => {
+      if (!s.categoryId) return;
+      getDescendantIds(s.categoryId, categories).forEach((id) => {
+        map[id] = (map[id] || 0) + 1;
+      });
+    });
+    return map;
+  }, [stickers, categories]);
+
+  const confirmCreate = useCallback(() => {
+    if (!createName.trim()) {
+      toast.error('请输入分类名称');
+      return;
+    }
+    createCategory(createName.trim(), currentFolderId, '📁');
+    setCreateName('');
+    setShowCreate(false);
+    toast.success(currentFolderId ? '子分类已创建' : '分类已创建');
+  }, [createName, createCategory, currentFolderId, toast]);
+
+  const confirmApplyCategory = useCallback(
+    (categoryId: string | null) => {
+      if (!selectedStickers.length) return;
+      moveStickersToCategory(Array.from(selectedIds), categoryId);
+      exitSelection();
+      setShowCategoryPick(false);
+      toast.success('已更新分类');
+    },
+    [selectedStickers.length, selectedIds, moveStickersToCategory, exitSelection, toast],
+  );
+
+  const handleExport = useCallback(async () => {
+    try {
+      selectedStickers.forEach((s) => touchSticker(s.id));
+      const outcome = await exportStickers(selectedStickers);
+      if (outcome.reason === 'gif_unsupported') {
+        toast.error('包含动图，无法批量导出');
+      } else if (!outcome.ok) {
+        toast.error(outcome.reason === 'unavailable' ? '当前设备不支持导出' : '导出失败');
+      } else {
+        toast.success('已打开导出面板');
+      }
+    } catch (e) {
+      console.warn(e);
+      toast.error('导出失败');
+    } finally {
+      exitSelection();
+    }
+  }, [selectedStickers, touchSticker, toast, exitSelection]);
+
+  const openCategory = useCallback((cat: CategoryModel) => {
+    setCurrentFolderId(cat.id);
+  }, []);
+
+  const goBack = useCallback(() => {
+    setCurrentFolderId(currentCategory?.parentId ?? null);
+  }, [currentCategory]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!currentFolderId) return;
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        goBack();
+        return true;
+      });
+      return () => subscription.remove();
+    }, [currentFolderId, goBack]),
+  );
+
+  const openRename = useCallback((cat: CategoryModel) => {
+    setRenameTarget(cat);
+    setRenameValue(cat.name);
+    setShowRename(true);
+    setManageTarget(null);
+  }, []);
+
+  const openDeleteCategory = useCallback((cat: CategoryModel) => {
+    setDeleteTarget(cat);
+    setShowDeleteCat(true);
+    setManageTarget(null);
+  }, []);
+
+  // ---------------------------------------------------------------- folder view
+  if (currentFolderId) {
+    return (
+      <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+        <ScreenHeader
+          title={currentCategory?.name || '分类'}
+          subtitle={`${childFolders.length} 个子分类 · ${directStickers.length} 张表情`}
+          right={
+            <Pressable onPress={goBack} style={[styles.headerBtn, { backgroundColor: theme.colors.inputBackground }]}>
+              <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}>返回</Text>
+            </Pressable>
+          }
+        />
+
+        <View style={styles.gridWrap}>
+          <StickerGrid
+            stickers={directStickers}
+            columns={settings.gridColumns}
+            selectMode={selectMode}
+            selectedIds={selectedIds}
+            showFormatLabel={settings.showFormatLabel}
+            animateGifs={settings.animateGifs}
+            onOpenSticker={(s) => {
+              if (selectMode) selection.toggle(s.id);
+              else navigation.navigate('Detail', { stickerId: s.id });
+            }}
+            onLongPress={(s) => selection.enterSelection(s.id)}
+            onDragSelect={selection.toggleForDrag}
+            ListHeaderComponent={
+              <View style={styles.folderHeader}>
+                <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>子分类</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
+                  {childFolders.map((child) => (
+                    <Pressable
+                      key={child.id}
+                      onPress={() => openCategory(child)}
+                      style={[styles.folderChip, { backgroundColor: theme.colors.card, borderColor: theme.colors.cardBorder }]}
+                    >
+                      <Text style={{ fontSize: 18 }}>📁</Text>
+                      <Text style={[styles.folderChipText, { color: theme.colors.text }]}>{child.name}</Text>
+                    </Pressable>
+                  ))}
+                  {childFolders.length === 0 && (
+                    <Text style={{ color: theme.colors.textMuted, paddingVertical: 12 }}>暂无子分类</Text>
+                  )}
+                </ScrollView>
+                <Pressable onPress={() => setShowCreate(true)} style={[styles.newFolderBtn, { backgroundColor: theme.colors.primarySoft }]}>
+                  <Text style={{ color: theme.colors.primary, fontSize: 14, fontWeight: '700' }}>＋ 新建子分类</Text>
+                </Pressable>
+              </View>
+            }
+            ListEmptyComponent={
+              <EmptyState icon="🗂️" title="这个分类还没有表情包" message="可以在这里导入或移动表情包" />
+            }
+          />
+        </View>
+
+        {selectMode && (
+          <SelectionBar
+            count={selectedIds.size}
+            onClose={exitSelection}
+            actions={[
+                { key: 'export', icon: '💾', label: '导出', onPress: handleExport },
+              { key: 'move', icon: '🗂️', label: '分类', onPress: () => setShowCategoryPick(true) },
+              { key: 'delete', icon: '🗑️', label: '删除', onPress: () => setShowDeleteStickers(true) },
+            ]}
+          />
+        )}
+
+        <ConfirmDialog
+          visible={showDeleteStickers}
+          title="删除表情包"
+          message={`确定删除选中的 ${selectedStickers.length} 张吗？`}
+          confirmLabel="删除"
+          danger
+          onConfirm={() => {
+            deleteStickers(Array.from(selectedIds));
+            toast.success(`已删除 ${selectedStickers.length} 张`);
+            exitSelection();
+            setShowDeleteStickers(false);
+          }}
+          onCancel={() => setShowDeleteStickers(false)}
+        />
+
+        <CategoryPicker
+          visible={showCategoryPick}
+          categories={categories}
+          selectedId={null}
+          onApply={confirmApplyCategory}
+          onClose={() => setShowCategoryPick(false)}
+          title="移动到分类"
+        />
+
+        <CreateCategoryModal
+          visible={showCreate}
+          value={createName}
+          onChange={setCreateName}
+          title="新建子分类"
+          placeholder="输入子分类名称"
+          onCancel={() => setShowCreate(false)}
+          onConfirm={confirmCreate}
+        />
+        <RenameCategoryModal
+          target={renameTarget}
+          value={renameValue}
+          onChange={setRenameValue}
+          onClose={() => setRenameTarget(null)}
+          onConfirm={() => {
+            if (renameTarget && renameValue.trim()) {
+              renameCategory(renameTarget.id, renameValue);
+              toast.success('已重命名');
+            }
+            setRenameTarget(null);
+          }}
+        />
+        <ConfirmDialog
+          visible={showDeleteCat}
+          title="删除分类"
+          message="删除后，该分类及其所有子分类都会被删除，其中的表情会变为未分类。确定删除吗？"
+          confirmLabel="删除"
+          danger
+          onConfirm={() => {
+            if (deleteTarget) deleteCategory(deleteTarget.id);
+            setShowDeleteCat(false);
+            setDeleteTarget(null);
+            if (currentCategory?.id === deleteTarget?.id) setCurrentFolderId(null);
+            toast.success('分类已删除');
+          }}
+          onCancel={() => {
+            setShowDeleteCat(false);
+            setDeleteTarget(null);
+          }}
+        />
+      </View>
+    );
+  }
+
+  // ---------------------------------------------------------------- root view
+  return (
+    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+      <ScreenHeader
+        title="分类"
+        subtitle={`${topLevel.length} 个分类`}
+        right={
+          <Pressable onPress={() => setShowCreate(true)} style={[styles.headerBtn, { backgroundColor: theme.colors.primary }]}>
+            <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>＋ 新建</Text>
+          </Pressable>
+        }
+      />
+
+      {!loaded ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={theme.colors.primary} />
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.list}>
+          {topLevel.map((c) => (
+            <Pressable
+              key={c.id}
+              onPress={() => openCategory(c)}
+              onLongPress={() => setManageTarget(c)}
+              style={[styles.catRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.cardBorder }]}
+            >
+              <View style={[styles.catIcon, { backgroundColor: theme.colors.primarySoft }]}>
+                <Text style={{ fontSize: 22 }}>📁</Text>
+              </View>
+              <View style={styles.catInfo}>
+                <Text style={[styles.catName, { color: theme.colors.text }]}>{c.name}</Text>
+                <Text style={[styles.catCount, { color: theme.colors.textMuted }]}>
+                  {countByCategory[c.id] || 0} 张表情 · {getChildren(categories, c.id).length} 个子分类
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.textMuted }}>›</Text>
+            </Pressable>
+          ))}
+          {topLevel.length === 0 && (
+            <EmptyState icon="🗂️" title="还没有分类" message="点击右上角新建一个文件夹分类吧" />
+          )}
+        </ScrollView>
+      )}
+
+      {manageTarget && (
+        <View style={styles.manageSheetWrap}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setManageTarget(null)} />
+          <View style={[styles.manageSheet, { backgroundColor: theme.colors.card, paddingBottom: 24 }]}>
+            <Text style={[styles.manageTitle, { color: theme.colors.text }]}>{manageTarget.name}</Text>
+            <View style={styles.manageRow}>
+              <Pressable onPress={() => openRename(manageTarget)} style={[styles.manageItem, { backgroundColor: theme.colors.inputBackground }]}>
+                <Text style={{ fontSize: 18 }}>✏️</Text>
+                <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '600' }}>重命名</Text>
+              </Pressable>
+              <Pressable onPress={() => openDeleteCategory(manageTarget)} style={[styles.manageItem, { backgroundColor: theme.colors.inputBackground }]}>
+                <Text style={{ fontSize: 18 }}>🗑️</Text>
+                <Text style={{ color: theme.colors.danger, fontSize: 14, fontWeight: '600' }}>删除分类</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      )}
+
+      <CreateCategoryModal
+        visible={showCreate}
+        value={createName}
+        onChange={setCreateName}
+        title="新建分类"
+        placeholder="输入分类名称"
+        onCancel={() => setShowCreate(false)}
+        onConfirm={confirmCreate}
+      />
+      <RenameCategoryModal
+        target={renameTarget}
+        value={renameValue}
+        onChange={setRenameValue}
+        onClose={() => setRenameTarget(null)}
+        onConfirm={() => {
+          if (renameTarget && renameValue.trim()) {
+            renameCategory(renameTarget.id, renameValue);
+            toast.success('已重命名');
+          }
+          setRenameTarget(null);
+        }}
+      />
+      <ConfirmDialog
+        visible={showDeleteCat}
+        title="删除分类"
+        message="删除后，该分类及其所有子分类都会被删除，其中的表情会变为未分类。确定删除吗？"
+        confirmLabel="删除"
+        danger
+        onConfirm={() => {
+          if (deleteTarget) deleteCategory(deleteTarget.id);
+          setShowDeleteCat(false);
+          setDeleteTarget(null);
+          toast.success('分类已删除');
+        }}
+        onCancel={() => {
+          setShowDeleteCat(false);
+          setDeleteTarget(null);
+        }}
+      />
+    </View>
+  );
+}
+
+function CreateCategoryModal({
+  visible,
+  value,
+  onChange,
+  title,
+  placeholder,
+  onCancel,
+  onConfirm,
+}: {
+  visible: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  title: string;
+  placeholder: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={onCancel}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
+        <View style={[styles.modalCard, { backgroundColor: theme.colors.card }]}>
+          <Text style={[styles.modalTitle, { color: theme.colors.text }]}>{title}</Text>
+          <TextInput
+            value={value}
+            onChangeText={onChange}
+            style={[styles.input, { backgroundColor: theme.colors.inputBackground, color: theme.colors.text }]}
+            placeholder={placeholder}
+            placeholderTextColor={theme.colors.placeholder}
+            autoFocus
+            onSubmitEditing={onConfirm}
+          />
+          <View style={styles.modalActions}>
+            <Pressable onPress={onCancel} style={[styles.modalBtn, { backgroundColor: theme.colors.inputBackground }]}>
+              <Text style={{ color: theme.colors.textSecondary }}>取消</Text>
+            </Pressable>
+            <Pressable onPress={onConfirm} style={[styles.modalBtn, { backgroundColor: theme.colors.primary }]}>
+              <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>创建</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function RenameCategoryModal({
+  target,
+  value,
+  onChange,
+  onClose,
+  onConfirm,
+}: {
+  target: CategoryModel | null;
+  value: string;
+  onChange: (v: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Modal transparent visible={target !== null} animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.modalCard, { backgroundColor: theme.colors.card }]}>
+          <Text style={[styles.modalTitle, { color: theme.colors.text }]}>重命名分类</Text>
+          <TextInput
+            value={value}
+            onChangeText={onChange}
+            style={[styles.input, { backgroundColor: theme.colors.inputBackground, color: theme.colors.text }]}
+            placeholder="输入新的名称"
+            placeholderTextColor={theme.colors.placeholder}
+            autoFocus
+            onSubmitEditing={onConfirm}
+          />
+          <View style={styles.modalActions}>
+            <Pressable onPress={onClose} style={[styles.modalBtn, { backgroundColor: theme.colors.inputBackground }]}>
+              <Text style={{ color: theme.colors.textSecondary }}>取消</Text>
+            </Pressable>
+            <Pressable onPress={onConfirm} style={[styles.modalBtn, { backgroundColor: theme.colors.primary }]}>
+              <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>保存</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  gridWrap: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  headerBtn: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999 },
+  list: { padding: 16, gap: 12 },
+  catRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+  },
+  catIcon: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  catInfo: { flex: 1, marginLeft: 12 },
+  catName: { fontSize: 16, fontWeight: '700' },
+  catCount: { fontSize: 13, marginTop: 2 },
+  folderHeader: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6 },
+  sectionLabel: { fontSize: 12, fontWeight: '700', marginBottom: 8 },
+  folderRow: { gap: 10, alignItems: 'center', paddingBottom: 10 },
+  folderChip: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minWidth: 84,
+  },
+  folderChipText: { fontSize: 14, fontWeight: '700', marginTop: 4 },
+  newFolderBtn: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10, marginTop: 4 },
+  manageSheetWrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, justifyContent: 'flex-end' },
+  manageSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 16 },
+  manageTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 14 },
+  manageRow: { flexDirection: 'row', gap: 12, paddingHorizontal: 20 },
+  manageItem: { flex: 1, alignItems: 'center', paddingVertical: 16, borderRadius: 14, gap: 6 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36 },
+  modalCard: { width: '100%', maxWidth: 320, borderRadius: 20, padding: 20 },
+  modalTitle: { fontSize: 17, fontWeight: '700', marginBottom: 14, textAlign: 'center' },
+  input: { borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  modalActions: { flexDirection: 'row', marginTop: 16, gap: 10 },
+  modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
+});
