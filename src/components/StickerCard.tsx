@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Sticker } from '../models/types';
 import { useTheme } from '../hooks/useTheme';
 import { StickerImage } from './StickerImage';
+import { Icon } from './Icon';
 
 interface Props {
   sticker: Sticker;
@@ -41,7 +42,7 @@ export const StickerCard = memo(function StickerCard({
 
       {sticker.isFavorite && (
         <View style={styles.favBadge}>
-          <Text style={styles.favIcon}>⭐</Text>
+          <Icon name="star" size={10} color={theme.colors.favorite} />
         </View>
       )}
 
@@ -81,9 +82,8 @@ const styles = StyleSheet.create({
     left: 4,
     backgroundColor: 'rgba(0,0,0,0.35)',
     borderRadius: 8,
-    padding: 1,
+    padding: 3,
   },
-  favIcon: { fontSize: 11 },
   formatBadge: {
     position: 'absolute',
     right: 4,

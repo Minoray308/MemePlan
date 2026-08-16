@@ -2,10 +2,11 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../hooks/useTheme';
+import { Icon, type AppIconName } from './Icon';
 
 interface ActionDef {
   key: string;
-  icon: string;
+  icon: AppIconName;
   label: string;
   onPress: () => void;
 }
@@ -41,8 +42,8 @@ export function SelectionBar({ count, actions, onClose }: Props) {
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.actionIcon}>{a.icon}</Text>
-            <Text style={[styles.actionLabel, { color: theme.colors.text }]}>{a.label}</Text>
+            <Icon name={a.icon} size={24} color={theme.colors.primary} />
+            <Text style={[styles.actionLabel, { color: theme.colors.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{a.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -74,7 +75,7 @@ const styles = StyleSheet.create({
   closeBtn: { paddingVertical: 4 },
   closeText: { fontSize: 15, fontWeight: '700' },
   count: { fontSize: 16, fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 10 },
+  actions: { flexDirection: 'row', gap: 6 },
   action: {
     flex: 1,
     alignItems: 'center',
@@ -82,7 +83,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 16,
   },
-  actionIcon: { fontSize: 24 },
-  actionLabel: { fontSize: 14, fontWeight: '700', marginTop: 4 },
+  actionLabel: { fontSize: 13, fontWeight: '700', marginTop: 6, maxWidth: '100%' },
   pressed: { opacity: 0.75 },
 });

@@ -15,7 +15,8 @@ export interface Sticker {
   createdAt: number;
   updatedAt: number;
   lastUsedAt: number | null;
-  isFavorite: boolean;
+  /** How many times the sticker was used (for the floating window's 高频 filter). */
+  useCount: number;  isFavorite: boolean;
   /** Single folder/category id. */
   categoryId: string | null;
   tags: string[];
@@ -63,4 +64,8 @@ export interface Settings {
   showFormatLabel: boolean;
   /** Animate GIF stickers on the home grid. */
   animateGifs: boolean;
+  /** Filter chips enabled in the floating quick-send window (keys from OVERLAY_FILTER_OPTIONS). */
+  overlayFilters: string[];
+  /** Whether to automatically exit the app after the floating window opens. */
+  exitAfterOverlay: boolean;
 }

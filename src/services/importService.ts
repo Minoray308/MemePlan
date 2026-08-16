@@ -153,6 +153,7 @@ export async function importAssets(
         createdAt: now,
         updatedAt: now,
         lastUsedAt: null,
+        useCount: 0,
         isFavorite: false,
         categoryId: null,
         tags: [],

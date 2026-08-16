@@ -1,20 +1,26 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, Modal, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, Modal, ActivityIndicator } from 'react-native';
 import { useStore } from '../state/StoreProvider';
 import { useTheme } from '../hooks/useTheme';
 import { useToast } from '../components/ToastProvider';
 import { useSelection } from '../hooks/useSelection';
+import { useFocusEffect } from '@react-navigation/native';
 import { TabNavigationProp } from '../navigation/types';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { StickerGrid } from '../components/StickerGrid';
 import { EmptyState } from '../components/EmptyState';
+import { Icon, CategoryIcon, type AppIconName } from '../components/Icon';
 import { SelectionBar } from '../components/SelectionBar';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { ImportSourceSheet } from '../components/ImportSourceSheet';
+import { BulkTagEditor } from '../components/BulkTagEditor';
 import { exportStickers } from '../services/shareService';
+import { saveStickersToGallery } from '../services/saveService';
+import { StickerOverlayService } from '../services/stickerOverlayService';
 import { MediaPermissionError, type ImportSourceKey } from '../services/importService';
 import { getChildren, getDescendantIds } from '../utils/category';
+import { OVERLAY_FILTER_OPTIONS, tagFromOverlayKey } from '../constants/overlay';
 import type { Sticker, StickerFileType } from '../models/types';
 
 type Props = { navigation: TabNavigationProp<'Home'> };
@@ -31,7 +37,7 @@ interface FilterOption {
 interface FilterGroup {
   key: string;
   label: string;
-  icon: string;
+  icon: AppIconName;
   options: FilterOption[];
 }
 
@@ -46,7 +52,7 @@ const STATIC_FILTER_GROUPS: FilterGroup[] = [
   {
     key: 'time',
     label: '时间',
-    icon: '🕒',
+    icon: 'clock-outline',
     options: [
       { value: 'all', label: '全部时间' },
       { value: '7d', label: '最近 7 天' },
@@ -57,7 +63,7 @@ const STATIC_FILTER_GROUPS: FilterGroup[] = [
   {
     key: 'format',
     label: '格式',
-    icon: '🖼️',
+    icon: 'image-multiple-outline',
     options: [
       { value: 'all', label: '全部格式' },
       { value: 'png', label: 'PNG' },
@@ -71,7 +77,7 @@ const STATIC_FILTER_GROUPS: FilterGroup[] = [
   {
     key: 'size',
     label: '大小',
-    icon: '📏',
+    icon: 'resize',
     options: [
       { value: 'all', label: '全部大小' },
       { value: 'small', label: '小于 100KB' },
@@ -82,7 +88,7 @@ const STATIC_FILTER_GROUPS: FilterGroup[] = [
   {
     key: 'tags',
     label: '标签',
-    icon: '🏷️',
+    icon: 'tag-outline',
     options: [
       { value: 'all', label: '全部标签' },
       { value: 'tagged', label: '有标签' },
@@ -115,6 +121,7 @@ export function HomeScreen({ navigation }: Props) {
   const [progress, setProgress] = useState({ picked: 0, done: 0, total: 0 });
   const [showImport, setShowImport] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [showTagEdit, setShowTagEdit] = useState(false);
   const [showCategory, setShowCategory] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [showSort, setShowSort] = useState(false);
@@ -124,9 +131,28 @@ export function HomeScreen({ navigation }: Props) {
   const [filterFormats, setFilterFormats] = useState<Set<string>>(new Set());
   const [filterSizes, setFilterSizes] = useState<Set<string>>(new Set());
   const [filterTags, setFilterTags] = useState<Set<string>>(new Set());
+  const [overlayOpen, setOverlayOpen] = useState(false);
+
+  // Keep the floating-window button in sync with the native overlay.
+  useEffect(() => {
+    const sub = StickerOverlayService.addListener('onClosed', () => setOverlayOpen(false));
+    return () => sub.remove();
+  }, []);
 
   const selection = useSelection();
   const { selectMode, selectedIds, exitSelection } = selection;
+
+  // Android hardware back cancels multi-select instead of leaving the app.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!selectMode) return undefined;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        exitSelection();
+        return true;
+      });
+      return () => sub.remove();
+    }, [selectMode, exitSelection]),
+  );
 
   const topLevelCategories = useMemo(() => getChildren(categories, null), [categories]);
 
@@ -135,6 +161,13 @@ export function HomeScreen({ navigation }: Props) {
       a.localeCompare(b, 'zh'),
     );
   }, [allTags, stickers]);
+
+  // category id -> name, so the floating window can search by category too.
+  const categoryNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of categories) map[c.id] = c.name;
+    return map;
+  }, [categories]);
 
   const activeFilterCount = useMemo(() => {
     return (
@@ -278,6 +311,27 @@ export function HomeScreen({ navigation }: Props) {
     [stickers, selectedIds],
   );
 
+  const handleSaveToAlbum = useCallback(async () => {
+    if (!selectedStickers.length) return;
+    try {
+      const outcome = await saveStickersToGallery(selectedStickers);
+      if (outcome.ok) {
+        toast.success(outcome.saved === outcome.total ? `已保存 ${outcome.saved} 张到相册` : `已保存 ${outcome.saved}/${outcome.total} 张`);
+      } else if (outcome.reason === 'denied') {
+        toast.error('需要相册权限才能保存');
+      } else if (outcome.reason === 'unavailable') {
+        toast.error('当前设备不支持保存到相册');
+      } else {
+        toast.error('保存失败，请重试');
+      }
+    } catch (e) {
+      console.warn(e);
+      toast.error('保存失败');
+    } finally {
+      exitSelection();
+    }
+  }, [selectedStickers, toast, exitSelection]);
+
   const handleExport = useCallback(async () => {
     if (!selectedStickers.length) return;
     try {
@@ -297,6 +351,79 @@ export function HomeScreen({ navigation }: Props) {
       exitSelection();
     }
   }, [selectedStickers, touchSticker, toast, exitSelection]);
+
+  const requestOverlayPermission = useCallback(async (): Promise<boolean> => {
+    try {
+      const granted = await StickerOverlayService.canDrawOverlays();
+      if (granted) return true;
+      Alert.alert(
+        '开启悬浮窗权限',
+        '“快速发送”需要“显示在其他应用上层”权限。请在系统设置中允许本应用显示悬浮窗，然后返回本应用再次点击。',
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '去开启',
+            onPress: () => {
+              StickerOverlayService.openOverlaySettings().catch(() => {});
+            },
+          },
+        ],
+      );
+      return false;
+    } catch (e) {
+      console.warn('[home] check overlay permission failed', e);
+      return false;
+    }
+  }, []);
+
+  const openOverlay = useCallback(
+    async (stickersForOverlay: Sticker[]) => {
+      if (Platform.OS !== 'android' || !StickerOverlayService.isAvailable()) {
+        toast.error('当前预览版不支持悬浮窗，请使用安装版');
+        return;
+      }
+      const granted = await requestOverlayPermission();
+      if (!granted) return;
+      try {
+        const activeTags = new Set([...allTags, ...stickers.flatMap((s) => s.tags)]);
+        const safeFilters = settings.overlayFilters.filter((key) => {
+          const tag = tagFromOverlayKey(key);
+          return tag === null
+            ? OVERLAY_FILTER_OPTIONS.some((o) => o.key === key)
+            : activeTags.has(tag);
+        });
+        const ok = await StickerOverlayService.showOverlay(stickersForOverlay, categoryNames, safeFilters);
+        if (ok) {
+          setOverlayOpen(true);
+          if (settings.exitAfterOverlay) {
+            // The overlay is a system window: finish the activity right away
+            // and let the window stay on screen.
+            setTimeout(() => BackHandler.exitApp(), 100);
+          }
+        } else {
+          toast.error('打开悬浮窗失败，请重试');
+        }
+      } catch (e) {
+        console.warn('[home] open overlay failed', e);
+        toast.error('打开悬浮窗失败');
+      }
+    },
+    [toast, requestOverlayPermission, categoryNames, settings.overlayFilters, settings.exitAfterOverlay, allTags, stickers],
+  );
+
+  const handleToggleOverlay = useCallback(() => {
+    if (overlayOpen) {
+      StickerOverlayService.hideOverlay().catch(() => {});
+      setOverlayOpen(false);
+      return;
+    }
+    openOverlay(stickers);
+  }, [overlayOpen, stickers, openOverlay]);
+
+  const handleOverlaySendSelected = useCallback(() => {
+    if (!selectedStickers.length) return;
+    openOverlay(selectedStickers);
+  }, [selectedStickers, openOverlay]);
 
   const handleBulkDelete = useCallback(() => {
     deleteStickers(Array.from(selectedIds));
@@ -368,6 +495,13 @@ export function HomeScreen({ navigation }: Props) {
         subtitle={`共 ${stickers.length} 张`}
         right={
           <>
+            <Pressable
+              onPress={handleToggleOverlay}
+              style={[styles.overlayBtn, { backgroundColor: overlayOpen ? theme.colors.primary : theme.colors.inputBackground }]}
+              accessibilityLabel={overlayOpen ? '关闭悬浮窗' : '打开悬浮窗'}
+            >
+              <Text style={[styles.overlayBtnText, { color: overlayOpen ? '#FFFFFF' : theme.colors.text }]}>悬浮</Text>
+            </Pressable>
             <Pressable onPress={() => setShowSort(true)} style={[styles.sortBtn, { backgroundColor: theme.colors.inputBackground }]}>
               <Text style={[styles.sortBtnText, { color: theme.colors.text }]}>排序</Text>
             </Pressable>
@@ -385,7 +519,7 @@ export function HomeScreen({ navigation }: Props) {
 
       <View style={styles.searchRow}>
         <View style={[styles.searchBox, { backgroundColor: theme.colors.inputBackground }]}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <Icon name="magnify" size={16} color={theme.colors.textMuted} />
           <TextInput
             value={query}
             onChangeText={setQuery}
@@ -408,9 +542,9 @@ export function HomeScreen({ navigation }: Props) {
         contentContainerStyle={styles.chipContent}
       >
         {[
-          { id: CAT_ALL, name: '全部', icon: '🖼️' },
-          { id: CAT_RECENTS, name: '最近', icon: '🕘' },
-          { id: CAT_FAVORITES, name: '收藏', icon: '⭐' },
+          { id: CAT_ALL, name: '全部', icon: 'image-multiple-outline' },
+          { id: CAT_RECENTS, name: '最近', icon: 'clock-outline' },
+          { id: CAT_FAVORITES, name: '收藏', icon: 'star' },
           ...topLevelCategories,
         ].map((c) => {
           const active = activeCategory === c.id;
@@ -426,7 +560,7 @@ export function HomeScreen({ navigation }: Props) {
                 },
               ]}
             >
-              <Text style={{ fontSize: 14 }}>{c.icon}</Text>
+              <CategoryIcon icon={c.icon} size={16} color={active ? '#FFFFFF' : theme.colors.textSecondary} />
               <Text style={[styles.chipText, { color: active ? '#fff' : theme.colors.text }]}>{c.name}</Text>
             </Pressable>
           );
@@ -451,7 +585,7 @@ export function HomeScreen({ navigation }: Props) {
             onDragSelect={selection.toggleForDrag}
             ListEmptyComponent={
               <EmptyState
-                icon={query || activeFilterCount > 0 ? '🔍' : '🖼️'}
+                icon={query || activeFilterCount > 0 ? 'magnify' : 'image-multiple-outline'}
                 title={emptyTitle}
                 message={emptyMessage}
                 actionLabel={showImportEmpty ? '导入表情包' : undefined}
@@ -467,9 +601,12 @@ export function HomeScreen({ navigation }: Props) {
           count={selectedIds.size}
           onClose={exitSelection}
           actions={[
-            { key: 'export', icon: '💾', label: '导出', onPress: handleExport },
-            { key: 'move', icon: '🗂️', label: '分类', onPress: () => setShowCategory(true) },
-            { key: 'delete', icon: '🗑️', label: '删除', onPress: () => setShowDelete(true) },
+            { key: 'save', icon: 'download-outline', label: '存相册', onPress: handleSaveToAlbum },
+            { key: 'export', icon: 'export-variant', label: '导出', onPress: handleExport },
+            { key: 'overlay', icon: 'picture-in-picture-bottom-right-outline', label: '悬浮窗', onPress: handleOverlaySendSelected },
+            { key: 'move', icon: 'folder-move-outline', label: '分类', onPress: () => setShowCategory(true) },
+            { key: 'tags', icon: 'tag-multiple-outline', label: '标签', onPress: () => setShowTagEdit(true) },
+            { key: 'delete', icon: 'delete-outline', label: '删除', onPress: () => setShowDelete(true) },
           ]}
         />
       )}
@@ -494,6 +631,12 @@ export function HomeScreen({ navigation }: Props) {
       />
 
       <ImportSourceSheet visible={showImport} onClose={() => setShowImport(false)} onSelect={handleSelectImport} />
+
+      <BulkTagEditor
+        visible={showTagEdit}
+        stickerIds={Array.from(selectedIds)}
+        onClose={() => setShowTagEdit(false)}
+      />
 
       <Modal transparent visible={showSort} animationType="fade" onRequestClose={() => setShowSort(false)}>
         <View style={styles.sortOverlay}>
@@ -551,7 +694,7 @@ export function HomeScreen({ navigation }: Props) {
                     onPress={() => setExpandedFilter(expanded ? null : group.key)}
                     style={[styles.filterGroupHeader, { backgroundColor: theme.colors.inputBackground }]}
                   >
-                    <Text style={{ fontSize: 16 }}>{group.icon}</Text>
+                    <Icon name={group.icon} size={18} color={theme.colors.textSecondary} />
                     <Text style={[styles.filterGroupLabel, { color: theme.colors.text }]}>{group.label}</Text>
                     <Text style={{ color: theme.colors.textMuted, fontSize: 16 }}>{expanded ? '▾' : '▸'}</Text>
                   </Pressable>
@@ -630,6 +773,8 @@ export function HomeScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   importBtn: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999 },
+  overlayBtn: { paddingHorizontal: 11, paddingVertical: 9, borderRadius: 999 },
+  overlayBtnText: { fontSize: 14, fontWeight: '700' },
   importText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   sortBtn: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999 },
   sortBtnText: { fontSize: 13, fontWeight: '700' },

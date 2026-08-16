@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
+import { Icon, type AppIconName } from './Icon';
 import { importSourceOptions, type ImportSourceKey } from '../services/importService';
 
 interface Props {
@@ -9,10 +10,10 @@ interface Props {
   onSelect: (source: ImportSourceKey) => void;
 }
 
-const SOURCE_META: Record<ImportSourceKey, { icon: string; title: string; description: string }> = {
-  library: { icon: '🖼️', title: '从相册导入', description: '选择一张或多张系统相册图片' },
-  files: { icon: '📁', title: '从文件导入', description: '浏览设备中的图片文件' },
-  clipboard: { icon: '📋', title: '从剪贴板', description: '粘贴当前剪贴板中的图片' },
+const SOURCE_META: Record<ImportSourceKey, { icon: AppIconName; title: string; description: string }> = {
+  library: { icon: 'image-multiple-outline', title: '从相册导入', description: '选择一张或多张系统相册图片' },
+  files: { icon: 'folder-open-outline', title: '从文件导入', description: '浏览设备中的图片文件' },
+  clipboard: { icon: 'clipboard-outline', title: '从剪贴板', description: '粘贴当前剪贴板中的图片' },
 };
 
 export function ImportSourceSheet({ visible, onClose, onSelect }: Props) {
@@ -38,7 +39,7 @@ export function ImportSourceSheet({ visible, onClose, onSelect }: Props) {
                   { backgroundColor: theme.colors.inputBackground, opacity: source.available ? (pressed ? 0.75 : 1) : 0.4 },
                 ]}
               >
-                <Text style={styles.icon}>{meta.icon}</Text>
+                <Icon name={meta.icon} size={24} color={theme.colors.primary} />
                 <View style={styles.rowText}>
                   <Text style={[styles.rowTitle, { color: theme.colors.text }]}>{meta.title}</Text>
                   <Text style={[styles.rowDescription, { color: theme.colors.textSecondary }]}>{meta.description}</Text>
@@ -75,8 +76,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginBottom: 10,
   },
-  icon: { fontSize: 24, marginRight: 12 },
-  rowText: { flex: 1 },
+  rowText: { flex: 1, marginLeft: 12 },
   rowTitle: { fontSize: 15, fontWeight: '700' },
   rowDescription: { fontSize: 12, marginTop: 2 },
   cancel: { borderRadius: 16, paddingVertical: 13, alignItems: 'center', marginTop: 4 },

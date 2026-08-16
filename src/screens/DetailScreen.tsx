@@ -9,6 +9,7 @@ import { RootStackParamList } from '../navigation/types';
 import { StickerImage } from '../components/StickerImage';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CategoryPicker } from '../components/CategoryPicker';
+import { Icon, CategoryIcon } from '../components/Icon';
 import { exportSticker } from '../services/shareService';
 import { formatDate, formatFileSize } from '../utils/format';
 
@@ -141,13 +142,13 @@ export function DetailScreen({ navigation, route }: Props) {
           <View style={styles.nameRow}>
             <Text style={[styles.name, { color: theme.colors.text }]}>{sticker.name}</Text>
             <Pressable onPress={openRename} hitSlop={8} style={[styles.nameEdit, { backgroundColor: theme.colors.inputBackground }]}>
-              <Text style={{ fontSize: 15 }}>✏️</Text>
+              <Icon name="pencil-outline" size={16} color={theme.colors.textSecondary} />
             </Pressable>
             <Pressable
               onPress={() => toggleFavorite(sticker.id)}
               style={[styles.favBtn, { backgroundColor: sticker.isFavorite ? theme.colors.primarySoft : theme.colors.inputBackground }]}
             >
-              <Text style={{ fontSize: 18 }}>{sticker.isFavorite ? '⭐' : '☆'}</Text>
+              <Icon name={sticker.isFavorite ? 'star' : 'star-outline'} size={22} color={sticker.isFavorite ? theme.colors.favorite : theme.colors.textSecondary} />
             </Pressable>
           </View>
 
@@ -161,7 +162,8 @@ export function DetailScreen({ navigation, route }: Props) {
               ) : (
                 <View style={styles.tagWrap}>
                   <View style={[styles.tag, { backgroundColor: theme.colors.primarySoft }]}>
-                    <Text style={{ color: theme.colors.primary, fontSize: 12, fontWeight: '600' }}>{stickerCategory.icon} {stickerCategory.name}</Text>
+                    <CategoryIcon icon={stickerCategory.icon} size={13} color={theme.colors.primary} />
+                    <Text style={{ color: theme.colors.primary, fontSize: 12, fontWeight: '600', marginLeft: 4 }}>{stickerCategory.name}</Text>
                   </View>
                 </View>
               )}
@@ -197,11 +199,11 @@ export function DetailScreen({ navigation, route }: Props) {
 
         <View style={styles.actionsRow}>
           <Pressable onPress={handleExport} style={[styles.action, { backgroundColor: theme.colors.primary }]}>
-            <Text style={styles.actionEmoji}>💾</Text>
+            <Icon name="export-variant" size={22} color="#FFFFFF" />
             <Text style={styles.actionText}>导出</Text>
           </Pressable>
           <Pressable onPress={() => setShowDelete(true)} style={[styles.action, { backgroundColor: theme.colors.inputBackground }]}>
-            <Text style={styles.actionEmoji}>🗑️</Text>
+            <Icon name="delete-outline" size={22} color={theme.colors.danger} />
             <Text style={[styles.actionTextLocal, { color: theme.colors.danger }]}>删除</Text>
           </Pressable>
         </View>
@@ -325,7 +327,7 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 14, fontWeight: '600' },
   valueWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   tagWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, flexShrink: 1, justifyContent: 'flex-end' },
-  tag: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  tag: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center' },
   actionsRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
   action: { flex: 1, borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
   actionEmoji: { fontSize: 20 },

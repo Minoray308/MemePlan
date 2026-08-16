@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Category, Settings, Sticker } from '../models/types';
 import { STORAGE_KEYS } from '../constants';
+import { DEFAULT_OVERLAY_FILTERS, LEGACY_OVERLAY_FILTER_KEYS } from '../constants/overlay';
 
 /**
  * Data access layer. Uses AsyncStorage (local persistence) with a JSON payload.
@@ -58,6 +59,8 @@ export const DEFAULT_SETTINGS: Settings = {
   themeColor: '#2F7048',
   showFormatLabel: true,
   animateGifs: true,
+  overlayFilters: [...DEFAULT_OVERLAY_FILTERS],
+  exitAfterOverlay: false,
 };
 
 const LEGACY_THEME_COLORS: Record<string, string> = {
@@ -72,6 +75,15 @@ export async function loadSettings(): Promise<Settings> {
   const data = await loadJson<Partial<Settings>>(STORAGE_KEYS.settings);
   if (!data) return DEFAULT_SETTINGS;
   const merged = { ...DEFAULT_SETTINGS, ...data };
+  if (
+    Array.isArray(merged.overlayFilters) &&
+    merged.overlayFilters.some((key) => LEGACY_OVERLAY_FILTER_KEYS.includes(key))
+  ) {
+    // Older builds stored format-chip keys; the floating window now uses
+    // quick filters + tags instead, so reset to the new defaults once.
+    merged.overlayFilters = [...DEFAULT_OVERLAY_FILTERS];
+    saveSettings(merged).catch((e) => console.warn('[db] migrate overlay filters failed', e));
+  }
   if (merged.themeColor && LEGACY_THEME_COLORS[merged.themeColor]) {
     merged.themeColor = LEGACY_THEME_COLORS[merged.themeColor];
     saveSettings(merged).catch((e) => console.warn('[db] migrate theme color failed', e));

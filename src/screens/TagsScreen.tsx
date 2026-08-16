@@ -8,6 +8,7 @@ import { TabNavigationProp } from '../navigation/types';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { StickerGrid } from '../components/StickerGrid';
 import { EmptyState } from '../components/EmptyState';
+import { Icon } from '../components/Icon';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { Sticker } from '../models/types';
 
@@ -129,7 +130,7 @@ export function TagsScreen({ navigation }: Props) {
             animateGifs={settings.animateGifs}
             onOpenSticker={(s: Sticker) => navigation.navigate('Detail', { stickerId: s.id })}
             onLongPress={() => {}}
-            ListEmptyComponent={<EmptyState icon="🏷️" title="这个标签下还没有表情包" message="去表情详情页添加这个标签吧" />}
+            ListEmptyComponent={<EmptyState icon='tag-multiple-outline' title="这个标签下还没有表情包" message="去表情详情页添加这个标签吧" />}
           />
         </View>
       </View>
@@ -151,7 +152,7 @@ export function TagsScreen({ navigation }: Props) {
 
       <View style={styles.searchRow}>
         <View style={[styles.searchBox, { backgroundColor: theme.colors.inputBackground }]}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <Icon name="magnify" size={16} color={theme.colors.textMuted} />
           <TextInput
             value={query}
             onChangeText={setQuery}
@@ -168,7 +169,7 @@ export function TagsScreen({ navigation }: Props) {
       </View>
 
       {tags.length === 0 ? (
-        <EmptyState icon="🏷️" title={query ? '没有找到相关标签' : '还没有标签'} message={query ? '换个关键词试试吧' : '在表情详情页点击「标签」即可添加标签'} />
+        <EmptyState icon='tag-multiple-outline' title={query ? '没有找到相关标签' : '还没有标签'} message={query ? '换个关键词试试吧' : '在表情详情页点击「标签」即可添加标签'} />
       ) : (
         <ScrollView contentContainerStyle={styles.grid}>
           {tags.map((item) => (
@@ -183,7 +184,7 @@ export function TagsScreen({ navigation }: Props) {
                 <Text style={[styles.tagCount, { color: theme.colors.textMuted }]}>{item.count} 张表情</Text>
               </Pressable>
               <Pressable onPress={() => openEditor(item.tag)} hitSlop={6} style={[styles.editBtn, { backgroundColor: theme.colors.inputBackground }]}>
-                <Text style={{ fontSize: 14 }}>✏️</Text>
+                <Icon name="pencil-outline" size={16} color={theme.colors.textSecondary} />
               </Pressable>
             </View>
           ))}

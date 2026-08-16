@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import type { Category } from '../models/types';
 import { useTheme } from '../hooks/useTheme';
 import { getChildren } from '../utils/category';
+import { CategoryIcon } from './Icon';
 
 interface Props {
   visible: boolean;
@@ -79,7 +80,9 @@ export function CategoryPicker({
               onPress={() => selectCategory(null)}
               style={[styles.row, { borderBottomColor: theme.colors.divider }]}
             >
-              <Text style={styles.rowIcon}>🚫</Text>
+              <View style={styles.rowIconWrap}>
+                <CategoryIcon icon="close-circle-outline" size={20} color={theme.colors.textMuted} />
+              </View>
               <Text style={[styles.rowName, { color: theme.colors.text }]}>无分类</Text>
               <View style={[styles.chip, { borderColor: theme.colors.primary, backgroundColor: local === null ? theme.colors.primary : 'transparent' }]}>
                 <Text style={{ color: local === null ? '#FFFFFF' : theme.colors.primary, fontSize: 13, fontWeight: '600' }}>
@@ -97,8 +100,10 @@ export function CategoryPicker({
                   style={[styles.row, { borderBottomColor: theme.colors.divider, paddingLeft: 16 + depth * 18 }]}
                 >
                   <Pressable style={styles.folderMain} onPress={() => (hasChildren ? toggleExpanded(category.id) : selectCategory(category.id))}>
-                    <Text style={styles.folderArrow}>{hasChildren ? (expanded ? '▾' : '▸') : '·'}</Text>
-                    <Text style={styles.rowIcon}>{category.icon || '📁'}</Text>
+                    <Text style={[styles.folderArrow, { color: theme.colors.textMuted }]}>{hasChildren ? (expanded ? '▾' : '▸') : '·'}</Text>
+                    <View style={styles.rowIconWrap}>
+                      <CategoryIcon icon={category.icon} size={20} />
+                    </View>
                     <Text style={[styles.rowName, { color: theme.colors.text }]} numberOfLines={1}>
                       {category.name}
                     </Text>
@@ -122,7 +127,6 @@ export function CategoryPicker({
             <Pressable
               onPress={() => {
                 onApply(local);
-                onClose();
               }}
               style={[styles.btn, { backgroundColor: theme.colors.primary }]}
             >
@@ -154,8 +158,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   folderMain: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 2 },
-  folderArrow: { width: 20, fontSize: 14, color: '#9AA0AC' },
-  rowIcon: { fontSize: 20, marginRight: 10 },
+  folderArrow: { width: 20, fontSize: 14 },
+  rowIconWrap: { width: 28, alignItems: 'center', marginRight: 6 },
   rowName: { flex: 1, fontSize: 15 },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
   actions: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 12, gap: 10 },

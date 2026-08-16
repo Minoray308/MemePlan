@@ -1,5 +1,4 @@
 import React from 'react';
-import { StyleSheet, Text } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -10,6 +9,7 @@ import { CategoriesScreen } from '../screens/CategoriesScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { DetailScreen } from '../screens/DetailScreen';
 import { TagsScreen } from '../screens/TagsScreen';
+import { Icon } from '../components/Icon';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -34,7 +34,7 @@ function MainTabs() {
         component={HomeScreen}
         options={{
           title: '表情包',
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>🖼️</Text>,
+          tabBarIcon: ({ color }) => <Icon name="image-multiple-outline" size={20} color={color} />,
         }}
       />
       <Tab.Screen
@@ -42,7 +42,7 @@ function MainTabs() {
         component={CategoriesScreen}
         options={{
           title: '分类',
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>🗂️</Text>,
+          tabBarIcon: ({ color }) => <Icon name="folder-multiple-outline" size={20} color={color} />,
         }}
       />
       <Tab.Screen
@@ -50,7 +50,7 @@ function MainTabs() {
         component={TagsScreen}
         options={{
           title: '标签',
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>🏷️</Text>,
+          tabBarIcon: ({ color }) => <Icon name="tag-multiple-outline" size={20} color={color} />,
         }}
       />
       <Tab.Screen
@@ -58,7 +58,7 @@ function MainTabs() {
         component={SettingsScreen}
         options={{
           title: '设置',
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>⚙️</Text>,
+          tabBarIcon: ({ color }) => <Icon name="cog-outline" size={20} color={color} />,
         }}
       />
     </Tab.Navigator>
@@ -95,6 +95,3 @@ export function RootNavigator() {
   );
 }
 
-const styles = StyleSheet.create({
-  tabIcon: { fontSize: 20 },
-});

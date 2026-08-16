@@ -9,10 +9,12 @@ import { TabNavigationProp } from '../navigation/types';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { StickerGrid } from '../components/StickerGrid';
 import { EmptyState } from '../components/EmptyState';
+import { Icon, CategoryIcon } from '../components/Icon';
 import { SelectionBar } from '../components/SelectionBar';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { exportStickers } from '../services/shareService';
+import { saveStickersToGallery } from '../services/saveService';
 import { getChildren, getDescendantIds } from '../utils/category';
 import type { Category as CategoryModel } from '../models/types';
 
@@ -86,7 +88,7 @@ export function CategoriesScreen({ navigation }: Props) {
       toast.error('请输入分类名称');
       return;
     }
-    createCategory(createName.trim(), currentFolderId, '📁');
+    createCategory(createName.trim(), currentFolderId, 'folder-outline');
     setCreateName('');
     setShowCreate(false);
     toast.success(currentFolderId ? '子分类已创建' : '分类已创建');
@@ -102,6 +104,27 @@ export function CategoriesScreen({ navigation }: Props) {
     },
     [selectedStickers.length, selectedIds, moveStickersToCategory, exitSelection, toast],
   );
+
+  const handleSaveToAlbum = useCallback(async () => {
+    if (!selectedStickers.length) return;
+    try {
+      const outcome = await saveStickersToGallery(selectedStickers);
+      if (outcome.ok) {
+        toast.success(outcome.saved === outcome.total ? `已保存 ${outcome.saved} 张到相册` : `已保存 ${outcome.saved}/${outcome.total} 张`);
+      } else if (outcome.reason === 'denied') {
+        toast.error('需要相册权限才能保存');
+      } else if (outcome.reason === 'unavailable') {
+        toast.error('当前设备不支持保存到相册');
+      } else {
+        toast.error('保存失败，请重试');
+      }
+    } catch (e) {
+      console.warn(e);
+      toast.error('保存失败');
+    } finally {
+      exitSelection();
+    }
+  }, [selectedStickers, toast, exitSelection]);
 
   const handleExport = useCallback(async () => {
     try {
@@ -192,7 +215,7 @@ export function CategoriesScreen({ navigation }: Props) {
                       onPress={() => openCategory(child)}
                       style={[styles.folderChip, { backgroundColor: theme.colors.card, borderColor: theme.colors.cardBorder }]}
                     >
-                      <Text style={{ fontSize: 18 }}>📁</Text>
+                      <CategoryIcon icon={child.icon} size={18} />
                       <Text style={[styles.folderChipText, { color: theme.colors.text }]}>{child.name}</Text>
                     </Pressable>
                   ))}
@@ -206,7 +229,7 @@ export function CategoriesScreen({ navigation }: Props) {
               </View>
             }
             ListEmptyComponent={
-              <EmptyState icon="🗂️" title="这个分类还没有表情包" message="可以在这里导入或移动表情包" />
+              <EmptyState icon='folder-multiple-outline' title="这个分类还没有表情包" message="可以在这里导入或移动表情包" />
             }
           />
         </View>
@@ -216,9 +239,10 @@ export function CategoriesScreen({ navigation }: Props) {
             count={selectedIds.size}
             onClose={exitSelection}
             actions={[
-                { key: 'export', icon: '💾', label: '导出', onPress: handleExport },
-              { key: 'move', icon: '🗂️', label: '分类', onPress: () => setShowCategoryPick(true) },
-              { key: 'delete', icon: '🗑️', label: '删除', onPress: () => setShowDeleteStickers(true) },
+                { key: 'save', icon: 'download-outline', label: '存相册', onPress: handleSaveToAlbum },
+                { key: 'export', icon: 'export-variant', label: '导出', onPress: handleExport },
+              { key: 'move', icon: 'folder-move-outline', label: '分类', onPress: () => setShowCategoryPick(true) },
+              { key: 'delete', icon: 'delete-outline', label: '删除', onPress: () => setShowDeleteStickers(true) },
             ]}
           />
         )}
@@ -318,7 +342,7 @@ export function CategoriesScreen({ navigation }: Props) {
               style={[styles.catRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.cardBorder }]}
             >
               <View style={[styles.catIcon, { backgroundColor: theme.colors.primarySoft }]}>
-                <Text style={{ fontSize: 22 }}>📁</Text>
+                <CategoryIcon icon={c.icon} size={24} color={theme.colors.primary} />
               </View>
               <View style={styles.catInfo}>
                 <Text style={[styles.catName, { color: theme.colors.text }]}>{c.name}</Text>
@@ -330,7 +354,7 @@ export function CategoriesScreen({ navigation }: Props) {
             </Pressable>
           ))}
           {topLevel.length === 0 && (
-            <EmptyState icon="🗂️" title="还没有分类" message="点击右上角新建一个文件夹分类吧" />
+            <EmptyState icon='folder-multiple-outline' title="还没有分类" message="点击右上角新建一个文件夹分类吧" />
           )}
         </ScrollView>
       )}
@@ -342,11 +366,11 @@ export function CategoriesScreen({ navigation }: Props) {
             <Text style={[styles.manageTitle, { color: theme.colors.text }]}>{manageTarget.name}</Text>
             <View style={styles.manageRow}>
               <Pressable onPress={() => openRename(manageTarget)} style={[styles.manageItem, { backgroundColor: theme.colors.inputBackground }]}>
-                <Text style={{ fontSize: 18 }}>✏️</Text>
+                <Icon name="pencil-outline" size={20} color={theme.colors.textSecondary} />
                 <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '600' }}>重命名</Text>
               </Pressable>
               <Pressable onPress={() => openDeleteCategory(manageTarget)} style={[styles.manageItem, { backgroundColor: theme.colors.inputBackground }]}>
-                <Text style={{ fontSize: 18 }}>🗑️</Text>
+                <Icon name="delete-outline" size={20} color={theme.colors.danger} />
                 <Text style={{ color: theme.colors.danger, fontSize: 14, fontWeight: '600' }}>删除分类</Text>
               </Pressable>
             </View>

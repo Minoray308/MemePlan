@@ -1,0 +1,212 @@
+# Build an Android APK via EAS Build, download the artifact, compute its
+# SHA-256, upload it to Cloudflare R2 and publish a public HTTPS download URL.
+#
+# Triggers:
+#   - manual: Actions tab -> "Run workflow"
+#   - tag:    git tag v2.5.0 && git push origin v2.5.0
+#
+# Required GitHub configuration (repo -> Settings -> Secrets and variables -> Actions):
+#   Secrets:
+#     EXPO_TOKEN             Expo access token (https://expo.dev/settings/access-tokens)
+#     CLOUDFLARE_ACCOUNT_ID  Cloudflare account ID
+#     R2_ACCESS_KEY_ID       R2 API token access key ID
+#     R2_SECRET_ACCESS_KEY   R2 API token secret
+#     R2_BUCKET              e.g. my-app-releases
+#   Variable (recommended) or Secret:
+#     R2_PUBLIC_BASE_URL     Public HTTPS base URL of the R2 bucket,
+#                            e.g. https://download.example.com
+#                            Prefer a repository *Variable* so the clickable
+#                            APK URL is not masked in the Actions summary.
+#
+# The R2 bucket must be publicly readable (bucket "Public access" or a custom
+# domain), otherwise the final anonymous download check fails.
+
+name: Build & Upload Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    name: Build APK and upload to Cloudflare R2
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install EAS CLI
+        run: npm install --global eas-cli@22
+
+      - name: Verify AWS CLI
+        run: aws --version
+
+      - name: Verify EAS login
+        run: eas whoami
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android APK on EAS
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          eas build \
+            --platform android \
+            --profile production-apk \
+            --non-interactive \
+            --wait \
+            --message "GitHub Actions: ${GITHUB_REF_NAME}" \
+            --json > dist/build.json
+          # Make sure the captured output is valid JSON and normalize it to a single build object.
+          jq empty dist/build.json
+          jq -c 'if type == "array" then .[0] else . end' dist/build.json > dist/build-single.json
+          STATUS="$(jq -r '.status' dist/build-single.json)"
+          echo "EAS build status: ${STATUS}"
+          test "${STATUS}" = "FINISHED"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Resolve version and download APK
+        run: |
+          set -euo pipefail
+          BUILD_JSON="dist/build-single.json"
+
+          # versionName — prefer the actual value used by EAS for this build.
+          VERSION="$(jq -r '.appVersion // empty' "${BUILD_JSON}")"
+          if [ -z "${VERSION}" ]; then
+            VERSION="$(jq -r '.expo.version // empty' app.json)"
+          fi
+
+          # versionCode — prefer the actual value used by EAS
+          # (appVersionSource is "remote", so EAS manages the versionCode).
+          VERSION_CODE="$(jq -r '.appBuildVersion // empty' "${BUILD_JSON}")"
+          if [ -z "${VERSION_CODE}" ]; then
+            VERSION_CODE="$(jq -r '.expo.android.versionCode // empty' app.json)"
+          fi
+
+          test -n "${VERSION}" || { echo "::error::Could not resolve app version"; exit 1; }
+          test -n "${VERSION_CODE}" || { echo "::error::Could not resolve versionCode"; exit 1; }
+
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "VERSION_CODE=${VERSION_CODE}" >> "${GITHUB_ENV}"
+          echo "Resolved VERSION=${VERSION} VERSION_CODE=${VERSION_CODE}"
+
+          # Download the APK artifact from the EAS build result.
+          ARTIFACT_URL="$(jq -r '.artifacts.applicationArchiveUrl // .artifacts.buildUrl // empty' "${BUILD_JSON}")"
+          test -n "${ARTIFACT_URL}" || { echo "::error::No APK artifact URL found in the EAS build result"; exit 1; }
+          curl -fL --retry 3 --retry-delay 5 \
+            -H "Authorization: Bearer ${EXPO_TOKEN}" \
+            -o dist/app.apk "${ARTIFACT_URL}"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Verify APK
+        run: |
+          set -euo pipefail
+          test -f dist/app.apk
+          file dist/app.apk
+          ls -lh dist/app.apk
+          FILE_TYPE="$(file -b dist/app.apk)"
+          case "${FILE_TYPE}" in
+            *"Zip archive"*|*"Java archive"*|*"Android"*) ;;
+            *) echo "::error::Downloaded file does not look like an APK: ${FILE_TYPE}"; exit 1 ;;
+          esac
+          unzip -l dist/app.apk | grep -q "AndroidManifest.xml" \
+            || { echo "::error::AndroidManifest.xml not found inside the APK"; exit 1; }
+
+      - name: Compute SHA-256
+        run: |
+          set -euo pipefail
+          SHA256="$(sha256sum dist/app.apk | awk '{print $1}')"
+          echo "SHA256=${SHA256}" >> "${GITHUB_ENV}"
+          echo "APK SHA-256: ${SHA256}"
+
+      - name: Upload APK to Cloudflare R2
+        run: |
+          set -euo pipefail
+          PUBLIC_BASE_URL="${R2_PUBLIC_BASE_URL%/}"
+          APK_URL="${PUBLIC_BASE_URL}/android/${VERSION}/app.apk"
+          echo "APK_URL=${APK_URL}" >> "${GITHUB_ENV}"
+          echo "Uploading to android/${VERSION}/app.apk ..."
+          aws s3 cp dist/app.apk "s3://${R2_BUCKET}/android/${VERSION}/app.apk" \
+            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --content-type "application/vnd.android.package-archive" \
+            --only-show-errors
+        env:
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL || secrets.R2_PUBLIC_BASE_URL }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Upload release metadata to Cloudflare R2
+        run: |
+          set -euo pipefail
+          PUBLIC_BASE_URL="${R2_PUBLIC_BASE_URL%/}"
+          CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg platform "android" \
+            --arg version "${VERSION}" \
+            --argjson versionCode "${VERSION_CODE}" \
+            --arg apkUrl "${PUBLIC_BASE_URL}/android/${VERSION}/app.apk" \
+            --arg sha256 "${SHA256}" \
+            --arg createdAt "${CREATED_AT}" \
+            '{platform: $platform, version: $version, versionCode: $versionCode, apkUrl: $apkUrl, sha256: $sha256, createdAt: $createdAt}' \
+            > dist/release.json
+          echo "release.json:"
+          cat dist/release.json
+          aws s3 cp dist/release.json "s3://${R2_BUCKET}/android/${VERSION}/release.json" \
+            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --content-type "application/json" \
+            --only-show-errors
+        env:
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL || secrets.R2_PUBLIC_BASE_URL }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Verify public download
+        run: |
+          set -euo pipefail
+          HTTP_CODE="$(curl -sSL -o /dev/null -w '%{http_code}' -I "${APK_URL}")"
+          echo "HTTP ${HTTP_CODE} -> ${APK_URL}"
+          test "${HTTP_CODE}" = "200" \
+            || { echo "::error::Public APK URL is not anonymously reachable (HTTP ${HTTP_CODE})"; exit 1; }
+
+      - name: Write Actions summary
+        run: |
+          set -euo pipefail
+          RELEASE_JSON_URL="${R2_PUBLIC_BASE_URL%/}/android/${VERSION}/release.json"
+          {
+            echo "## Android APK Build"
+            echo ""
+            echo "**Version:** ${VERSION}"
+            echo ""
+            echo "**Version Code:** ${VERSION_CODE}"
+            echo ""
+            echo "**SHA-256:** ${SHA256}"
+            echo ""
+            echo "**APK URL:** [${APK_URL}](${APK_URL})"
+            echo ""
+            echo "**Release metadata:** [${RELEASE_JSON_URL}](${RELEASE_JSON_URL})"
+          } >> "${GITHUB_STEP_SUMMARY}"
+        env:
+          R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL || secrets.R2_PUBLIC_BASE_URL }}

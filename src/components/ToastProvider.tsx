@@ -81,7 +81,7 @@ function ToastItem({ toast, onDone }: { toast: ToastMessage; onDone: () => void 
   }, []);
 
   const bg =
-    toast.type === 'success' ? '#2FBF71' : toast.type === 'error' ? theme.colors.danger : '#2B2F38';
+    toast.type === 'success' ? theme.colors.primary : toast.type === 'error' ? theme.colors.danger : '#2B2F38';
 
   return (
     <Animated.View style={[styles.item, { opacity, transform: [{ translateY: translate }] }]}>
@@ -109,3 +109,4 @@ const styles = StyleSheet.create({
   },
   text: { color: '#FFFFFF', fontSize: 14, fontWeight: '600', textAlign: 'center' },
 });
+

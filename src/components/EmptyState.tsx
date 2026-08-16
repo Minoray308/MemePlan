@@ -1,21 +1,22 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
+import { Icon, type AppIconName } from './Icon';
 
 interface Props {
-  icon?: string;
+  icon?: AppIconName;
   title: string;
   message?: string;
   actionLabel?: string;
   onAction?: () => void;
 }
 
-export function EmptyState({ icon = '🖼️', title, message, actionLabel, onAction }: Props) {
+export function EmptyState({ icon = 'image-multiple-outline', title, message, actionLabel, onAction }: Props) {
   const theme = useTheme();
   return (
     <View style={styles.container}>
       <View style={[styles.iconWrap, { backgroundColor: theme.colors.primarySoft }]}>
-        <Text style={styles.icon}>{icon}</Text>
+        <Icon name={icon} size={38} color={theme.colors.primary} />
       </View>
       <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
       {!!message && (
@@ -53,7 +54,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 18,
   },
-  icon: { fontSize: 40 },
   title: { fontSize: 18, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
   message: { fontSize: 14, textAlign: 'center', lineHeight: 21 },
   button: {
