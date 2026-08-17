@@ -44,6 +44,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -201,20 +204,44 @@ jobs:
           # Standard SHA256SUMS format: "<hash>  <filename>"
           printf '%s  %s\n' "${SHA256}" "${APK_NAME}" > dist/${APK_NAME}.sha256
 
-          NOTES="Android APK ${VERSION} (versionCode ${VERSION_CODE})
+          # Changelog: commits since the previous release tag (or all history).
+          PREV_RELEASE_TAG="$(
+            gh release list --repo "${GITHUB_REPOSITORY}" --limit 50 \
+              | awk -v ctag="${TAG}" '
+                  $1 != ctag { print $1; exit }
+                '
+          )"
+          if [ -n "${PREV_RELEASE_TAG}" ]; then
+            LOG_RANGE="${PREV_RELEASE_TAG}..HEAD"
+          else
+            LOG_RANGE="HEAD"
+          fi
+          CHANGELOG="$(
+            git log --no-merges --pretty=format:'- %s' "${LOG_RANGE}" 2>/dev/null || true
+          )"
+          if [ -z "${CHANGELOG}" ]; then
+            CHANGELOG="首次发布（无更新日志条目）"
+          fi
 
-SHA-256:
-\`\`\`
-${SHA256}  ${APK_NAME}
-\`\`\`
-
-APK: https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APK_NAME}"
+          {
+            echo "Android APK ${VERSION} (versionCode ${VERSION_CODE})"
+            echo ""
+            echo "SHA-256:"
+            echo "\`\`\`"
+            echo "${SHA256}  ${APK_NAME}"
+            echo "\`\`\`"
+            echo ""
+            echo "APK: https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APK_NAME}"
+            echo ""
+            echo "## 更新日志"
+            echo "${CHANGELOG}"
+          } > dist/release-notes.md
 
           gh release create "${TAG}" \
             dist/${APK_NAME} dist/${APK_NAME}.sha256 \
             --repo "${GITHUB_REPOSITORY}" \
             --title "MemePlan v${VERSION}" \
-            --notes "${NOTES}" \
+            --notes-file dist/release-notes.md \
             || { echo "::error::gh release create failed (release ${TAG} may already exist)"; exit 1; }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
