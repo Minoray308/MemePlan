@@ -1,6 +1,5 @@
 import React, { useCallback, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import * as Updates from 'expo-updates';
 import { useStore } from '../state/StoreProvider';
 import { useTheme } from '../hooks/useTheme';
 import { useToast } from '../components/ToastProvider';
@@ -17,7 +16,7 @@ const MAX_COLUMNS = 64;
 export function SettingsScreen() {
   const theme = useTheme();
   const toast = useToast();
-  const { isChecking, checkNow, runningVersionCode } = useUpdateManager();
+  const { isChecking, checkNow, runningVersionCode, currentVersion } = useUpdateManager();
   const { settings, updateSettings, deleteStickers, stickers, allTags } = useStore();
   const [showClear, setShowClear] = useState(false);
   const [showColumnsInput, setShowColumnsInput] = useState(false);
@@ -89,13 +88,14 @@ export function SettingsScreen() {
   /** Manual "检查更新" — the shared UpdateProvider owns prompting/downloading. */
   const onCheckForUpdates = useCallback(async () => {
     if (isChecking) return;
-    const outcome = await checkNow();
+    const result = await checkNow();
+    const outcome = result.outcome;
     if (outcome === 'latest') {
       toast.success('已是最新版本');
     } else if (outcome === 'unavailable') {
       toast.info('当前环境不支持更新');
     } else if (outcome === 'error') {
-      toast.error('检查更新失败，请稍后重试');
+      toast.error(result.message ?? '检查更新失败，请稍后重试');
     }
   }, [isChecking, checkNow, toast]);
 
@@ -275,7 +275,7 @@ export function SettingsScreen() {
                 {isChecking ? '正在检查…' : '检查更新'}
               </Text>
               <Text style={[styles.rowHint, { color: theme.colors.textMuted, marginTop: 2 }]}>
-                v{Updates.runtimeVersion ?? '1.0.0'}{runningVersionCode != null ? ` · code ${runningVersionCode}` : ''}
+                v{currentVersion}{runningVersionCode != null ? ` · code ${runningVersionCode}` : ''}
               </Text>
             </View>
             <Text style={{ color: theme.colors.textMuted }}>›</Text>
@@ -297,7 +297,7 @@ export function SettingsScreen() {
           </Pressable>
         </View>
 
-        <Text style={[styles.about, { color: theme.colors.textMuted }]}>MemePlan v{Updates.runtimeVersion ?? '1.0.0'} · 本地离线存储</Text>
+        <Text style={[styles.about, { color: theme.colors.textMuted }]}>MemePlan v{currentVersion} · 本地离线存储</Text>
       </ScrollView>
 
       <Modal transparent visible={showOverlayFilters} animationType="slide" onRequestClose={() => setShowOverlayFilters(false)}>
@@ -504,6 +504,7 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: 'row', marginTop: 16, gap: 10 },
   modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
 });
+
 
 
 

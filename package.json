@@ -36,7 +36,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:update-logic": "tsc --ignoreConfig scripts/update-logic.test.ts src/services/update/updateLogic.ts src/constants/update.ts --outDir tmp-test-out --module commonjs --target es2020 --moduleResolution node10 --ignoreDeprecations 6.0 --esModuleInterop --skipLibCheck && node tmp-test-out/scripts/update-logic.test.js && node -e \"require('fs').rmSync('tmp-test-out',{recursive:true,force:true})\""
   },
   "private": true
 }

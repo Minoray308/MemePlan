@@ -1,11 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { UPDATE_MIN_CHECK_INTERVAL_MS } from '../../constants/update';
-import { getAppUpdateInfo } from './updateApi';
-import { checkOtaUpdate } from './otaUpdater';
-import { isApkUpdateSupported } from './apkUpdater';
-import type { AppUpdateInfo, UpdateCheckOutcome } from './updateTypes';
+import { AUTO_CHECK_INTERVAL_MS } from '../../constants/update';
+import { canInstallApk, getAppUpdateInfo } from './updateApi';
+import type {
+  AppUpdateInfo,
+  UpdateCheckErrorCode,
+  UpdateCheckOutcome,
+} from './updateTypes';
+import { UpdateCheckError } from './updateTypes';
 
-const LAST_CHECK_KEY = 'update:lastCheckAt:v1';
+const LAST_CHECK_KEY = 'update:lastCheckAt:v2';
 
 /** Guards against duplicate checks (manual + automatic racing each other). */
 let checkInFlight = false;
@@ -13,6 +16,8 @@ let checkInFlight = false;
 export interface CheckResult {
   outcome: UpdateCheckOutcome;
   info: AppUpdateInfo | null;
+  code?: UpdateCheckErrorCode;
+  message?: string;
 }
 
 async function getLastCheckAt(): Promise<number | null> {
@@ -34,14 +39,17 @@ async function setLastCheckAt(ts: number): Promise<void> {
 }
 
 /**
- * Unified update check.
+ * Unified update check against GitHub Releases.
  *
- * - `force = true` always checks (app cold start, manual "检查更新" button).
- * - `force = false` is throttled: no more than one check every 30 minutes
- *   (used for app-foreground checks).
+ * - `force = true` (manual "检查更新" button) always checks regardless of any
+ *   cached timestamp, so users can always discover the newest release.
+ * - `force = false` (app open / foreground) is throttled to one real check
+ *   every AUTO_CHECK_INTERVAL_MS (6 hours).
  *
- * The server's `updateType` decides OTA vs APK — never the version numbers.
- * Any failure returns `outcome: 'error'` so the app simply keeps running.
+ * Newer build is decided by semver comparison of the running versionName vs
+ * the latest release tag. Any failure returns `outcome: 'error'` with a
+ * stable `code` + friendly `message` so the app keeps running and the UI can
+ * explain what happened.
  */
 export async function checkForUpdate(force = false): Promise<CheckResult> {
   if (checkInFlight) return { outcome: 'latest', info: null };
@@ -49,7 +57,7 @@ export async function checkForUpdate(force = false): Promise<CheckResult> {
   try {
     if (!force) {
       const lastCheckAt = await getLastCheckAt();
-      if (lastCheckAt != null && Date.now() - lastCheckAt < UPDATE_MIN_CHECK_INTERVAL_MS) {
+      if (lastCheckAt != null && Date.now() - lastCheckAt < AUTO_CHECK_INTERVAL_MS) {
         return { outcome: 'latest', info: null };
       }
     }
@@ -58,25 +66,15 @@ export async function checkForUpdate(force = false): Promise<CheckResult> {
     const info = await getAppUpdateInfo();
     if (!info) return { outcome: 'latest', info: null };
 
-    if (info.updateType === 'ota') {
-      const ota = await checkOtaUpdate();
-      if (!ota.available) {
-        // Server advertises OTA, but expo-updates has nothing for this
-        // runtime (e.g. the OTA targets a newer native build). Nothing to do.
-        if (ota.disabled) return { outcome: 'unavailable', info };
-        return { outcome: 'latest', info: null };
-      }
-      return { outcome: 'ota', info };
-    }
-
-    // updateType === 'apk'
-    if (!isApkUpdateSupported()) {
+    // The app only installs APKs on Android with the native module present.
+    if (!canInstallApk()) {
       return { outcome: 'unavailable', info };
     }
     return { outcome: 'apk', info };
   } catch (e) {
-    console.warn('[update] check failed', e);
-    return { outcome: 'error', info: null };
+    const err = e instanceof UpdateCheckError ? e : new UpdateCheckError('network');
+    console.warn('[update] GitHub release check failed', e);
+    return { outcome: 'error', info: null, code: err.code, message: err.message };
   } finally {
     checkInFlight = false;
   }

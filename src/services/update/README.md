@@ -1,66 +1,86 @@
-# 更新系统（OTA + APK）
+# 更新系统（GitHub Releases + Android APK）
 
-由服务端 `updateType` 决定走 Expo OTA 还是 App 内下载 APK，`versionCode` 是唯一版本判断依据。
+更新源是当前 GitHub 仓库（`Minoray803/memeplan`）的公开 Releases。App 只支持
+Android：通过系统安装器在应用内下载并安装 APK。无 OTA（expo-updates 保留但不参与
+本次更新判断，见 `otaUpdater.ts`）。
 
-## 1. 配置更新服务器
+## 1. 仓库配置（集中定义）
 
-在 `src/constants/update.ts` 中设置：
+`src/constants/update.ts` 中的 `GITHUB_OWNER` / `GITHUB_REPO` 是唯一出处：
 
 ```ts
-export const UPDATE_API_URL: string | null = 'https://your-server.example.com/api/app/update';
+export const GITHUB_OWNER = 'Minoray803';
+export const GITHUB_REPO = 'memeplan';
 ```
 
-未配置（或服务器不可达）时，自动回退到 `src/constants/versionInfo.ts` 中内嵌的发布信息（需要 `versionCode > 运行中的 versionCode` 才会提示）。
+请求的完整 URL 为：
 
-## 2. 版本接口返回格式
-
-`GET {UPDATE_API_URL}` 返回：
-
-```jsonc
-// OTA 小更新
-{
-  "version": "2.4.1",
-  "versionCode": 241,
-  "updateType": "ota",
-  "changelog": "修复部分问题"
-}
-
-// APK 大更新
-{
-  "version": "2.5.0",
-  "versionCode": 250,
-  "updateType": "apk",
-  "apkUrl": "https://cdn.example.com/app-2.5.0.apk",
-  "sha256": "xxxx",          // 可选，提供则下载后校验
-  "changelog": "修复问题并增加新功能"
-}
+```
+https://api.github.com/repos/Minoray803/memeplan/releases/latest
 ```
 
-- 服务器返回 `versionCode <= 当前版本` 时不更新。
-- `updateType` 必须明确返回 `ota` 或 `apk`，客户端不会按版本号自动推断。
-- 请求失败时 App 静默跳过本次检查，不影响正常使用。
+公开接口、匿名访问、无需 GitHub Token。
 
-## 3. 检查时机
+## 2. 版本判断
 
-- App 冷启动检查一次。
-- App 从后台恢复且距上次检查超过 30 分钟时再检查。
-- 设置页“检查更新”按钮可手动触发。
+- 当前版本：读取 Android `versionName`（原生模块 `getVersionName`），如
+  `1.0.1`。
+- 最新版本：读取最新 Release 的 `tag_name`，去掉开头的 `v`，如 `v1.2.3 ->
+  1.2.3`。
+- 用真正的数值 semver 比较（`compareVersions`），不是字符串比较：
+  `1.10.0 > 1.9.0`、`1.2.0 > 1.1.9`。
+- 当远程版本 <= 当前版本时，认为没有更新。
+
+## 3. APK 选择（findApkAsset）
+
+只考虑 Release assets 中 `.apk` 文件，并按 `APK_NAME_PRIORITY` 排序：
+
+1. `universal`（通用包，最高优先）
+2. `arm64-v8a`
+3. `armeabi-v7a`
+4. `arm64` / `x86_64` / `x86` / `armeabi`（依次）
+5. 其它通用 `.apk`（最后）
+
+自动跳过 `test / debug / source / unsigned / unaligned / proguard` 等开发产物，
+且忽略 source code zip/tar.gz。APK 必须是 GitHub 托管的 https 地址
+（`github.com/.../releases/download/...` 或其重定向到 `objects.githubusercontent.com`），
+绝不从任意第三方主机下载。
+
+## 4. SHA-256（可选）
+
+GitHub 不会自动生成校验和。若发布者提供了下列之一，App 会在下载后校验 SHA-256：
+
+- 同名资产 `<apk>.sha256`
+- `SHA256SUMS` / `sha256sums` / `checksums` 资产中对应 `apk` 的一行
+- Release 说明（`body`）中包含 `<apk>` 的校验和
+
+未提供时不做校验（与现状一致）。
+
+## 5. 检查时机与缓存
+
+- 手动点击“检查更新”：总是立即强制检查（`force=true`），不受缓存影响。
+- 冷启动 / 从后台恢复：最多每 `AUTO_CHECK_INTERVAL_MS`（6 小时）请求一次 GitHub。
 - 所有更新都是非强制更新，用户随时可点“稍后”。
 
-## 4. 构建 APK
+## 6. 错误处理
 
-保留 production（AAB）不动，新增了 `production-apk` profile：
+- `403 / 429`：GitHub rate limit —— 提示“请求过于频繁，请稍后再试”。
+- 网络断开 / DNS：`network` —— 提示检查网络。
+- 超时：`timeout`。
+- JSON 解析失败：`parse`。
+- 404（仓库不存在或暂无 Release）：`no_release`。
+- 最新 Release 没有 APK：`no_apk`。
 
-```bash
-eas build --platform android --profile production-apk
-```
+错误码与文案见 `src/services/update/updateTypes.ts`（`defaultUpdateErrorMessage`）。
 
-构建完成后把 APK 上传到自己的 HTTPS CDN，并把 `apkUrl`（及可选 `sha256`）配置到版本接口。
+## 7. 发布流程（CI）
 
-## 5. 测试
+`.github/workflows/build-and-upload-apk.yml` 在打 tag 时构建 APK，计算 SHA-256，
+用 `gh release create` 发布 GitHub Release，并把 APK 与 `<apk>.sha256` 作为资产
+附加，同时在 Release 说明中附带校验和（供第 4 步使用）。
 
-OTA：`npx eas update --channel production` 发布 JS 更新，服务端返回 `updateType: "ota"` 且 versionCode 更高；在 release 构建中冷启动验证提示与 reload。
+## 8. 测试
 
-APK：用 `production-apk` 构建一个更高 versionCode 的 APK 上传到 CDN，服务端返回 `updateType: "apk"`；冷启动验证提示 → 下载进度 → SHA-256 → “允许安装未知应用”引导 → 系统安装器。
-
-> expo-updates 的 API 与自动检查在 Expo Go / 开发构建中不可用，需用 release 构建（.apk）测试完整流程。
+见下文“修改的文件”说明；逻辑（semver 比较 / APK 选择 / 错误映射）可用纯 JS 验证，
+完整下载-安装需在 Android release 构建（.apk）中验证（Expo Go / 开发构建不可用原生
+安装模块）。

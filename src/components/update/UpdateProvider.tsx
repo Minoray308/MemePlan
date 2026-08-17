@@ -8,9 +8,8 @@ import React, {
   useState,
 } from 'react';
 import { AppState } from 'react-native';
-import { getRunningVersionCode } from '../../services/update/updateApi';
-import { checkForUpdate } from '../../services/update/updateManager';
-import { applyOtaUpdate } from '../../services/update/otaUpdater';
+import { getCurrentVersion, getRunningVersionCode } from '../../services/update/updateApi';
+import { checkForUpdate, type CheckResult } from '../../services/update/updateManager';
 import {
   apkErrorFrom,
   canRequestPackageInstalls,
@@ -22,7 +21,6 @@ import type {
   ApkDownloadProgress,
   ApkUpdateError,
   AppUpdateInfo,
-  UpdateCheckOutcome,
 } from '../../services/update/updateTypes';
 import { useToast } from '../ToastProvider';
 import { UpdateDialog } from './UpdateDialog';
@@ -40,8 +38,10 @@ export interface UpdateManagerContextValue {
   isChecking: boolean;
   /** Installed Android versionCode of this build (native Android only). */
   runningVersionCode: number | null;
-  /** Manual check (Settings "检查更新"). Resolves with the check outcome. */
-  checkNow: () => Promise<UpdateCheckOutcome>;
+  /** Installed Android versionName (semver) of this build. */
+  currentVersion: string;
+  /** Manual check (Settings "检查更新"). Resolves with the check result. */
+  checkNow: () => Promise<CheckResult>;
   /** User tapped 立即更新. */
   confirmUpdate: () => void;
   /** User tapped 稍后 / dismissed the current flow. */
@@ -62,10 +62,11 @@ export function useUpdateManager(): UpdateManagerContextValue {
 
 /**
  * Owns the whole update lifecycle:
- * - checks once on cold start and on app foreground (>= 30 min apart),
+ * - throttled auto checks on cold start and app foreground (GitHub Releases,
+ *   at most every AUTO_CHECK_INTERVAL_MS unless the user checks manually),
  * - prompts with a non-blocking dialog ([稍后] / [立即更新]),
- * - OTA updates via expo-updates, APK updates via the native AppUpdater
- *   module (download + SHA-256 + install permission + system installer).
+ * - APK updates via the native AppUpdater module (download + SHA-256 +
+ *   install permission + the Android system installer).
  *
  * Any failure simply resets to idle — the app keeps running on the current
  * version. Checks never run inside a React render.
@@ -81,9 +82,10 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   const phaseRef = useRef<UpdatePhase>('idle');
   const infoRef = useRef<AppUpdateInfo | null>(null);
   const pendingApkPathRef = useRef<string | null>(null);
-  const dismissedVersionCodeRef = useRef<number | null>(null);
+  const dismissedVersionRef = useRef<string | null>(null);
 
   const runningVersionCode = useMemo(() => getRunningVersionCode(), []);
+  const currentVersion = useMemo(() => getCurrentVersion(), []);
 
   const setPhase = useCallback((next: UpdatePhase) => {
     phaseRef.current = next;
@@ -152,23 +154,20 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     async (force: boolean) => {
       if (phaseRef.current !== 'idle') return;
       const result = await checkForUpdate(force);
-      if (result.outcome !== 'ota' && result.outcome !== 'apk') return;
-      const target = result.info;
-      if (!target) return;
-      if (dismissedVersionCodeRef.current === target.versionCode) return;
-      presentPrompt(target);
+      if (result.outcome !== 'apk' || !result.info) return;
+      if (dismissedVersionRef.current === result.info.version) return;
+      presentPrompt(result.info);
     },
     [presentPrompt],
   );
 
-  // Cold-start check (once).
+  // Cold-start check (once, throttled so we don't hit GitHub on every open).
   useEffect(() => {
-    const timer = setTimeout(() => runAutoCheck(true), 1500);
+    const timer = setTimeout(() => runAutoCheck(false), 1500);
     return () => clearTimeout(timer);
   }, [runAutoCheck]);
 
-  // Foreground check (throttled to every 30 min) + resume after the install
-  // permission settings screen.
+  // Foreground check (throttled) + resume after the install permission screen.
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
@@ -182,39 +181,29 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.remove();
   }, [runApkFlow, runAutoCheck]);
 
-  const checkNow = useCallback(async (): Promise<UpdateCheckOutcome> => {
-    if (phaseRef.current !== 'idle') return 'latest';
+  const checkNow = useCallback(async (): Promise<CheckResult> => {
+    if (phaseRef.current !== 'idle') return { outcome: 'latest', info: null };
     setPhase('checking');
     const result = await checkForUpdate(true);
     let presented = false;
-    if (result.outcome === 'ota' || result.outcome === 'apk') {
-      const target = result.info;
-      if (target && dismissedVersionCodeRef.current !== target.versionCode) {
-        presentPrompt(target);
+    if (result.outcome === 'apk' && result.info) {
+      if (dismissedVersionRef.current !== result.info.version) {
+        presentPrompt(result.info);
         presented = true;
       }
     }
     if (!presented) setPhase('idle');
-    return result.outcome;
+    return result;
   }, [presentPrompt, setPhase]);
 
   const confirmUpdate = useCallback(() => {
     const target = infoRef.current;
     if (!target) return;
-    if (target.updateType === 'ota') {
-      setPhase('downloading');
-      applyOtaUpdate().catch((e) => {
-        console.warn('[update] OTA apply failed', e);
-        setError(apkErrorFrom(e));
-        setPhase('error');
-      });
-    } else {
-      runApkFlow(target, null);
-    }
-  }, [runApkFlow, setPhase]);
+    runApkFlow(target, null);
+  }, [runApkFlow]);
 
   const dismiss = useCallback(() => {
-    if (infoRef.current) dismissedVersionCodeRef.current = infoRef.current.versionCode;
+    if (infoRef.current) dismissedVersionRef.current = infoRef.current.version;
     reset();
   }, [reset]);
 
@@ -230,13 +219,24 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       error,
       isChecking: phase === 'checking',
       runningVersionCode,
+      currentVersion,
       checkNow,
       confirmUpdate,
       dismiss,
       retryUpdate: confirmUpdate,
       openInstallPermissionSettings,
     }),
-    [phase, info, apkProgress, error, runningVersionCode, checkNow, confirmUpdate, openInstallPermissionSettings],
+    [
+      phase,
+      info,
+      apkProgress,
+      error,
+      runningVersionCode,
+      currentVersion,
+      checkNow,
+      confirmUpdate,
+      openInstallPermissionSettings,
+    ],
   );
 
   return (
@@ -262,6 +262,3 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     </UpdateManagerContext.Provider>
   );
 }
-
-
-

@@ -30,7 +30,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: apk-release
@@ -191,6 +191,33 @@ jobs:
           test "${HTTP_CODE}" = "200" \
             || { echo "::error::Public APK URL is not anonymously reachable (HTTP ${HTTP_CODE})"; exit 1; }
 
+
+      - name: Create GitHub Release with APK
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          APK_NAME="memeplan-${VERSION}.apk"
+          cp dist/app.apk dist/${APK_NAME}
+          # Standard SHA256SUMS format: "<hash>  <filename>"
+          printf '%s  %s\n' "${SHA256}" "${APK_NAME}" > dist/${APK_NAME}.sha256
+
+          NOTES="Android APK ${VERSION} (versionCode ${VERSION_CODE})
+
+SHA-256:
+\`\`\`
+${SHA256}  ${APK_NAME}
+\`\`\`
+
+APK: https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APK_NAME}"
+
+          gh release create "${TAG}" \
+            dist/${APK_NAME} dist/${APK_NAME}.sha256 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "MemePlan v${VERSION}" \
+            --notes "${NOTES}" \
+            || { echo "::error::gh release create failed (release ${TAG} may already exist)"; exit 1; }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Write Actions summary
         run: |
           set -euo pipefail

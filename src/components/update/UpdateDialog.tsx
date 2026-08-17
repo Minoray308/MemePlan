@@ -20,8 +20,7 @@ export function UpdateDialog({ info, onLater, onUpdate }: Props) {
       <View style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onLater} />
         <View style={[styles.dialog, { backgroundColor: theme.colors.card }]}>
-          <Text style={[styles.title, { color: theme.colors.text }]}>发现新版本</Text>
-          <Text style={[styles.version, { color: theme.colors.primary }]}>v{info.version}</Text>
+          <Text style={[styles.title, { color: theme.colors.text }]}>发现新版本 v{info.version}</Text>
           {!!info.changelog && (
             <ScrollView style={styles.changelogWrap} bounces={false}>
               <Text style={[styles.changelog, { color: theme.colors.textSecondary }]}>
@@ -69,4 +68,7 @@ const styles = StyleSheet.create({
   btnText: { fontSize: 15, fontWeight: '600' },
   btnPrimaryText: { color: '#FFFFFF' },
 });
+
+
+
 
