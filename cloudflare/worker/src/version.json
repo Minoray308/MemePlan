@@ -1,0 +1,18 @@
+{
+  "platform": "android",
+  "latestVersion": "1.0.2",
+  "minimumVersion": "1.0.0",
+  "forceUpdate": false,
+  "apkUrl": "https://download.example.com/android/memeplan-1.0.2.apk",
+  "apkName": "memeplan-1.0.2.apk",
+  "sha256": "",
+  "releaseNotes": [
+    "示例版本信息：请把本文件改为你的真实版本元数据。",
+    "APK 已上传到 Cloudflare R2。"
+  ],
+  "publishedAt": "2026-08-19T00:00:00Z",
+  "ota": {
+    "enabled": true,
+    "runtimeVersion": "1.0.2"
+  }
+}

@@ -1,0 +1,26 @@
+# Cloudflare Worker for the MemePlan Android update version-check API.
+#
+# Deploy:
+#   1. Replace the KV namespace id below (or create with:
+#        npx wrangler kv namespace create VERSION_KV)
+#   2. npx wrangler deploy
+#
+# The Worker only serves JSON metadata (latest/minimum version + APK URL + OTA
+# flags). It never proxies APK bytes and never exposes secrets. APK files are
+# served directly from R2 + the Cloudflare CDN.
+
+name = "memeplan-update"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# Version metadata storage. Update the id (a real KV namespace is required for
+# deployment; the app falls back to the bundled version.json otherwise).
+[[kv_namespaces]]
+binding = "VERSION_KV"
+id = "00000000000000000000000000000000"
+
+# Optional: bind your R2 bucket if you later want the Worker to generate signed
+# R2 URLs for private access. Not required when the bucket is public.
+# [[r2_buckets]]
+# binding = "APK_BUCKET"
+# bucket_name = "memeplan-apks"

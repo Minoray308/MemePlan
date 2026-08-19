@@ -10,6 +10,7 @@ import React, {
 import { AppState } from 'react-native';
 import { getCurrentVersion, getRunningVersionCode } from '../../services/update/updateApi';
 import { checkForUpdate, type CheckResult } from '../../services/update/updateManager';
+import { applyOtaUpdate } from '../../services/update/otaUpdater';
 import {
   apkErrorFrom,
   canRequestPackageInstalls,
@@ -62,11 +63,13 @@ export function useUpdateManager(): UpdateManagerContextValue {
 
 /**
  * Owns the whole update lifecycle:
- * - throttled auto checks on cold start and app foreground (GitHub Releases,
- *   at most every AUTO_CHECK_INTERVAL_MS unless the user checks manually),
- * - prompts with a non-blocking dialog ([稍后] / [立即更新]),
- * - APK updates via the native AppUpdater module (download + SHA-256 +
- *   install permission + the Android system installer).
+ * - throttled auto checks on cold start and app foreground (Cloudflare
+ *   version API + expo-updates OTA, at most every AUTO_CHECK_INTERVAL_MS
+ *   unless the user checks manually),
+ * - prompts with a non-blocking dialog ([稍后] / [立即更新]) — or a blocking
+ *   one when the running version is below minimumVersion (forced update),
+ * - OTA updates via expo-updates, and APK updates via the native AppUpdater
+ *   module (download + SHA-256 + install permission + the Android installer).
  *
  * Any failure simply resets to idle — the app keeps running on the current
  * version. Checks never run inside a React render.
@@ -110,6 +113,21 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     [setPhase],
   );
 
+  /** OTA flow: download the JS bundle via expo-updates, then reload in place. */
+  const runOtaFlow = useCallback(async () => {
+    try {
+      setPhase('downloading');
+      setApkProgress(null);
+      await applyOtaUpdate();
+      // Only reached on failure — applyOtaUpdate() reloads on success.
+      reset();
+    } catch (e) {
+      console.warn('[update] OTA flow failed', e);
+      setError({ code: 'ERR_OTA_FAILED', message: '更新失败，请稍后重试' });
+      setPhase('error');
+    }
+  }, [reset, setPhase]);
+
   /** Full APK flow: permission gate -> download -> SHA-256 -> install. */
   const runApkFlow = useCallback(
     async (target: AppUpdateInfo, existingPath: string | null) => {
@@ -150,18 +168,41 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     [reset, setPhase],
   );
 
+  /** Route the chosen update type to its flow. */
+  const runUpdate = useCallback(
+    (target: AppUpdateInfo) => {
+      if (target.updateType === 'ota') {
+        runOtaFlow();
+      } else {
+        runApkFlow(target, null);
+      }
+    },
+    [runOtaFlow, runApkFlow],
+  );
+
   const runAutoCheck = useCallback(
     async (force: boolean) => {
       if (phaseRef.current !== 'idle') return;
       const result = await checkForUpdate(force);
-      if (result.outcome !== 'apk' || !result.info) return;
-      if (dismissedVersionRef.current === result.info.version) return;
+      if (
+        result.outcome !== 'apk' &&
+        result.outcome !== 'ota' &&
+        result.outcome !== 'unavailable'
+      ) {
+        return;
+      }
+      if (!result.info) return;
+      // Forced updates are never suppressed by a previous dismissal.
+      if (!result.info.force && dismissedVersionRef.current === result.info.version) {
+        return;
+      }
+      if (result.outcome === 'unavailable') return;
       presentPrompt(result.info);
     },
     [presentPrompt],
   );
 
-  // Cold-start check (once, throttled so we don't hit GitHub on every open).
+  // Cold-start check (once, throttled so we don't hit Cloudflare on every open).
   useEffect(() => {
     const timer = setTimeout(() => runAutoCheck(false), 1500);
     return () => clearTimeout(timer);
@@ -186,26 +227,37 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     setPhase('checking');
     const result = await checkForUpdate(true);
     let presented = false;
-    if (result.outcome === 'apk' && result.info) {
-      if (dismissedVersionRef.current !== result.info.version) {
+    if (
+      (result.outcome === 'apk' || result.outcome === 'ota') &&
+      result.info
+    ) {
+      if (result.info.force || dismissedVersionRef.current !== result.info.version) {
         presentPrompt(result.info);
         presented = true;
       }
+    } else if (result.outcome === 'unavailable' && result.info) {
+      toast.info('检测到新版本，但当前预览环境不支持安装');
     }
     if (!presented) setPhase('idle');
     return result;
-  }, [presentPrompt, setPhase]);
+  }, [presentPrompt, setPhase, toast]);
 
   const confirmUpdate = useCallback(() => {
     const target = infoRef.current;
     if (!target) return;
-    runApkFlow(target, null);
-  }, [runApkFlow]);
+    runUpdate(target);
+  }, [runUpdate]);
 
   const dismiss = useCallback(() => {
-    if (infoRef.current) dismissedVersionRef.current = infoRef.current.version;
+    const target = infoRef.current;
+    // A forced update (current < minimumVersion) cannot be skipped.
+    if (target?.force) {
+      presentPrompt(target);
+      return;
+    }
+    if (target) dismissedVersionRef.current = target.version;
     reset();
-  }, [reset]);
+  }, [presentPrompt, reset]);
 
   const openInstallPermissionSettings = useCallback(() => {
     openApkInstallSettings().catch(() => {});
@@ -243,7 +295,12 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     <UpdateManagerContext.Provider value={value}>
       {children}
       {phase === 'prompt' && info ? (
-        <UpdateDialog info={info} onLater={dismiss} onUpdate={confirmUpdate} />
+        <UpdateDialog
+          info={info}
+          force={info.force}
+          onLater={dismiss}
+          onUpdate={confirmUpdate}
+        />
       ) : null}
       {phase === 'downloading' && info ? (
         <UpdateProgress info={info} apkProgress={apkProgress} />

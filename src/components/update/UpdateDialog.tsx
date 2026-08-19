@@ -5,22 +5,32 @@ import type { AppUpdateInfo } from '../../services/update/updateTypes';
 
 interface Props {
   info: AppUpdateInfo;
+  /** Forced update (current < minimumVersion) — cannot be dismissed. */
+  force?: boolean;
   onLater: () => void;
   onUpdate: () => void;
 }
 
 /**
- * Non-blocking "发现新版本" dialog.
- * [稍后] closes it and the app keeps running; [立即更新] starts the update.
+ * "发现新版本" dialog.
+ * - Normal updates: [稍后] closes it and the app keeps running; [立即更新]
+ *   starts the update.
+ * - Forced updates: only [立即更新] is shown (current < minimumVersion), so
+ *   the user must install the newer build to keep using the app.
  */
-export function UpdateDialog({ info, onLater, onUpdate }: Props) {
+export function UpdateDialog({ info, force = false, onLater, onUpdate }: Props) {
   const theme = useTheme();
   return (
-    <Modal transparent visible animationType="fade" onRequestClose={onLater}>
+    <Modal transparent visible animationType="fade" onRequestClose={force ? () => {} : onLater}>
       <View style={styles.overlay}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onLater} />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={force ? () => {} : onLater}
+        />
         <View style={[styles.dialog, { backgroundColor: theme.colors.card }]}>
-          <Text style={[styles.title, { color: theme.colors.text }]}>发现新版本 v{info.version}</Text>
+          <Text style={[styles.title, { color: theme.colors.text }]}>
+            {force ? '需要更新才能继续使用' : `发现新版本 v${info.version}`}
+          </Text>
           {!!info.changelog && (
             <ScrollView style={styles.changelogWrap} bounces={false}>
               <Text style={[styles.changelog, { color: theme.colors.textSecondary }]}>
@@ -29,12 +39,14 @@ export function UpdateDialog({ info, onLater, onUpdate }: Props) {
             </ScrollView>
           )}
           <View style={styles.actions}>
-            <Pressable
-              onPress={onLater}
-              style={[styles.btn, { backgroundColor: theme.colors.inputBackground }]}
-            >
-              <Text style={[styles.btnText, { color: theme.colors.text }]}>稍后</Text>
-            </Pressable>
+            {!force && (
+              <Pressable
+                onPress={onLater}
+                style={[styles.btn, { backgroundColor: theme.colors.inputBackground }]}
+              >
+                <Text style={[styles.btnText, { color: theme.colors.text }]}>稍后</Text>
+              </Pressable>
+            )}
             <Pressable onPress={onUpdate} style={[styles.btn, { backgroundColor: theme.colors.primary }]}>
               <Text style={[styles.btnText, styles.btnPrimaryText]}>立即更新</Text>
             </Pressable>
@@ -60,7 +72,6 @@ const styles = StyleSheet.create({
     padding: 22,
   },
   title: { fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 6 },
-  version: { fontSize: 24, fontWeight: '800', textAlign: 'center', marginBottom: 10 },
   changelogWrap: { maxHeight: 180 },
   changelog: { fontSize: 14, lineHeight: 21, textAlign: 'center' },
   actions: { flexDirection: 'row', marginTop: 18 },
@@ -68,7 +79,3 @@ const styles = StyleSheet.create({
   btnText: { fontSize: 15, fontWeight: '600' },
   btnPrimaryText: { color: '#FFFFFF' },
 });
-
-
-
-

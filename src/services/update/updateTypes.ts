@@ -1,43 +1,47 @@
 /**
- * Types for the update system. The source of truth is the GitHub Releases API
- * of this repository; a newer build is decided by semver comparison of the
- * running app's versionName vs the latest release tag (see updateApi.ts).
+ * Types for the update system. The source of truth is the Cloudflare
+ * version-check API (see src/services/update/updateApi.ts); a newer build is
+ * decided by numeric semver comparison of the running versionName against the
+ * API's latest/minimum versions. Small (JS) updates go through expo-updates
+ * (OTA); large updates install an APK downloaded from Cloudflare R2.
  */
 
-/** How a GitHub-sourced update is delivered. Android only: in-app APK install. */
-export type UpdateType = 'apk';
-
-/** A GitHub Release asset (from the Releases API `assets` array). */
-export interface GitHubReleaseAsset {
-  name: string;
-  browserDownloadUrl: string;
-  size: number;
-  contentType: string;
+/** The payload returned by the Cloudflare Worker (see cloudflare/worker/src). */
+export interface ServerUpdateInfo {
+  platform: 'android';
+  latestVersion: string;
+  minimumVersion: string;
+  forceUpdate: boolean;
+  apkUrl?: string;
+  apkName?: string;
+  sha256?: string;
+  releaseNotes?: string[];
+  publishedAt?: string;
+  ota?: {
+    enabled: boolean;
+    runtimeVersion?: string;
+  };
 }
 
-/** The parts of a GitHub Release the updater cares about (from /releases/latest). */
-export interface GitHubRelease {
-  /** Raw tag, e.g. "v1.2.3" or "1.2.3". */
-  tagName: string;
-  /** Release title (`name`), or null. */
-  name: string | null;
-  /** Release notes / changelog (`body`), or null. */
-  body: string | null;
-  /** Release page URL (`html_url`). */
-  htmlUrl: string;
-  /** ISO publish timestamp, or null. */
-  publishedAt: string | null;
-  assets: GitHubReleaseAsset[];
-}
+/** How an available update is delivered to an Android device. */
+export type UpdateType = 'ota' | 'apk';
+
+/**
+ * How the update check decided what to report.
+ *  - 'latest':      the running build is current.
+ *  - 'ota':         a JS (expo-updates) update is available.
+ *  - 'apk':         a newer APK is available and installable.
+ *  - 'unavailable': a newer build exists but cannot be installed here (e.g. Expo Go).
+ *  - 'error':       the check failed (see `code`/`message`).
+ */
+export type UpdateCheckOutcome = 'latest' | 'ota' | 'apk' | 'unavailable' | 'error';
 
 /** Stable error codes surfaced to the UI with a friendly message. */
 export type UpdateCheckErrorCode =
   | 'network'
   | 'timeout'
-  | 'rate_limit'
   | 'http'
   | 'parse'
-  | 'no_apk'
   | 'no_release'
   | 'unsupported';
 
@@ -48,14 +52,10 @@ export function defaultUpdateErrorMessage(code: UpdateCheckErrorCode): string {
       return '网络连接异常，请检查网络后重试';
     case 'timeout':
       return '请求超时，请稍后重试';
-    case 'rate_limit':
-      return '请求过于频繁，请稍后再试';
     case 'http':
       return '检查更新失败，请稍后重试';
     case 'parse':
       return '更新信息解析失败，请稍后重试';
-    case 'no_apk':
-      return '最新版本未提供可安装的安装包（APK）';
     case 'no_release':
       return '暂无可用版本信息';
     case 'unsupported':
@@ -74,41 +74,48 @@ export class UpdateCheckError extends Error {
 }
 
 /**
- * Full update info shown in the UI and consumed by the APK download flow
- * (src/services/update/apkUpdater.ts).
+ * Full update info shown in the UI and consumed by the OTA/APK flows
+ * (src/services/update/*.ts).
  */
 export interface AppUpdateInfo {
-  /** Latest semver without the leading "v" (display, e.g. "1.2.3"). */
+  /** Latest semver without a leading "v" (display, e.g. "1.2.3"). */
   version: string;
   /** Alias of `version`. */
   latestVersion: string;
-  /** Raw GitHub tag, e.g. "v1.2.3". */
-  tagName: string;
   /** The running app's semver. */
   currentVersion: string;
-  updateType: UpdateType; // always 'apk' for a GitHub-sourced update
-  /** Direct HTTPS download URL of the selected APK asset. */
-  apkUrl: string;
-  /** Asset file name, e.g. "memeplan-1.2.3.apk". */
-  apkName: string;
+  /** Whether this update is forced (current < minimumVersion); cannot be skipped. */
+  force: boolean;
+  /** How the update is delivered. */
+  updateType: UpdateType;
+  /** Direct HTTPS download URL of the APK (APK updates only). */
+  apkUrl?: string;
+  /** APK file name (APK updates only), e.g. "memeplan-1.2.3.apk". */
+  apkName?: string;
   /** Optional SHA-256; verified after download when present. */
   sha256?: string;
-  /** Release notes (body). */
+  /** Changelog / release notes. */
   changelog?: string;
-  /** Release title (name). */
+  /** Release title / version label. */
   releaseTitle?: string;
-  /** Release page URL. */
-  releaseUrl?: string;
+  /** ISO publish timestamp of the newest build, if provided. */
+  publishedAt?: string;
 }
 
 /**
  * Result of a manual/automatic update check.
  *   - 'latest': no newer build.
+ *   - 'ota': a JS update is available.
  *   - 'apk': a newer APK is available and installable.
- *   - 'unavailable': newer build exists but cannot be installed here (Expo Go…).
+ *   - 'unavailable': newer build exists but cannot be installed here.
  *   - 'error': the check failed (see `code`/`message`).
  */
-export type UpdateCheckOutcome = 'latest' | 'apk' | 'unavailable' | 'error';
+export type CheckResult = {
+  outcome: UpdateCheckOutcome;
+  info: AppUpdateInfo | null;
+  code?: UpdateCheckErrorCode;
+  message?: string;
+};
 
 /** Progress emitted while downloading an APK (native module). */
 export interface ApkDownloadProgress {

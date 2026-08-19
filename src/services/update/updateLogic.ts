@@ -1,5 +1,4 @@
-import { APK_NAME_PRIORITY } from '../../constants/update';
-import type { GitHubRelease, GitHubReleaseAsset } from './updateTypes';
+import type { ServerUpdateInfo, UpdateCheckErrorCode } from './updateTypes';
 
 /**
  * Pure, dependency-free update logic (no react-native / native module), so it
@@ -41,58 +40,6 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/**
- * Only trust APK URLs that GitHub itself hosts: browser_download_url is
- * `https://github.com/<owner>/<repo>/releases/download/<tag>/<name>` (which
- * redirects to objects.githubusercontent.com for the bytes). Anything else in
- * the release JSON is ignored so the app never installs from an arbitrary
- * host. TLS is never disabled for these downloads.
- */
-export function isGithubAssetUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'https:') return false;
-    const host = u.hostname.toLowerCase();
-    return (
-      host === 'github.com' ||
-      host.endsWith('.github.com') ||
-      host === 'githubusercontent.com' ||
-      host.endsWith('.githubusercontent.com') ||
-      host === 'objects.githubusercontent.com'
-    );
-  } catch {
-    return false;
-  }
-}
-
-/** Lower rank = more preferred (see APK_NAME_PRIORITY). Infinity = not an APK. */
-export function rankApk(name: string): number {
-  const lower = name.toLowerCase();
-  if (!lower.endsWith('.apk')) return Infinity;
-  // Skip obvious non-app / development artifacts even if they end in .apk.
-  if (/test|debug|source|sources|unsigned|unaligned|proguard/.test(lower)) return Infinity;
-  for (let i = 0; i < APK_NAME_PRIORITY.length; i += 1) {
-    if (lower.includes(APK_NAME_PRIORITY[i].toLowerCase())) return i;
-  }
-  // Generic APK with no known ABI marker — accepted after all known ABIs.
-  return APK_NAME_PRIORITY.length + 1;
-}
-
-/**
- * Picks the APK to install from a release's assets. Only `.apk` files are
- * considered; source zips/tar.gz are never candidates. Selections are ranked
- * by APK_NAME_PRIORITY (universal first, then native ABIs this project
- * builds); ties are broken alphabetically by asset name.
- */
-export function findApkAsset(release: GitHubRelease): GitHubReleaseAsset | null {
-  const candidates = release.assets
-    .filter((a) => isGithubAssetUrl(a.browserDownloadUrl) && a.name.length > 0)
-    .map((a) => ({ asset: a, rank: rankApk(a.name) }))
-    .filter((c) => c.rank !== Infinity)
-    .sort((x, y) => x.rank - y.rank || x.asset.name.localeCompare(y.asset.name));
-  return candidates.length > 0 ? candidates[0].asset : null;
-}
-
 /** Extracts a 64-hex SHA-256 that names `apkName` from standard checksum text. */
 export function hashForApkFromText(text: string, apkName: string): string | null {
   const lowerName = apkName.toLowerCase();
@@ -119,4 +66,108 @@ export function hashForApkFromText(text: string, apkName: string): string | null
   return null;
 }
 
+/** Result of the pure version-decision logic (no I/O). */
+export type UpdateDecision =
+  | { kind: 'latest' }
+  /** current < minimumVersion and an APK is available -> forced install. */
+  | { kind: 'force_apk' }
+  /** normal newer build delivered as a JS (OTA) update. */
+  | { kind: 'ota' }
+  /** normal newer build delivered as an APK. */
+  | { kind: 'apk' }
+  /** an update is required/available but there is no APK URL to install. */
+  | { kind: 'requires_apk_without_url' };
 
+/**
+ * Decides what the app should do given the server version metadata. Pure and
+ * side-effect free so it can be unit-tested in isolation.
+ *
+ * Rules:
+ *  - current < minimumVersion -> forced update (APK required).
+ *  - otherwise, current < latestVersion -> OTA when OTA is enabled and no new
+ *    APK is published, else APK (large update wins when both exist).
+ *  - otherwise -> latest.
+ */
+export function decideUpdate(params: {
+  currentVersion: string;
+  latestVersion: string;
+  minimumVersion: string;
+  otaEnabled: boolean;
+  hasApk: boolean;
+}): UpdateDecision {
+  const { currentVersion, latestVersion, minimumVersion, otaEnabled, hasApk } = params;
+
+  if (compareVersions(currentVersion, minimumVersion) < 0) {
+    return hasApk ? { kind: 'force_apk' } : { kind: 'requires_apk_without_url' };
+  }
+
+  if (compareVersions(latestVersion, currentVersion) > 0) {
+    if (otaEnabled && !hasApk) return { kind: 'ota' };
+    return hasApk ? { kind: 'apk' } : { kind: 'requires_apk_without_url' };
+  }
+
+  return { kind: 'latest' };
+}
+
+/** Maps a non-OK HTTP status to a stable update-check error code. */
+export function mapServerStatusToCode(status: number): UpdateCheckErrorCode {
+  if (status === 404) return 'no_release';
+  return 'http';
+}
+
+/** True when `url` is an HTTPS URL (used to gate APK downloads). */
+export function isHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates a raw JSON payload from the Cloudflare version API into a typed
+ * ServerUpdateInfo. Pure; throws UpdateCheckError('parse') on bad payloads so
+ * tests can verify the "server JSON error" path.
+ */
+export function parseServerUpdateInfoRaw(raw: unknown): ServerUpdateInfo {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('invalid payload');
+  }
+  const r = raw as Record<string, unknown>;
+  if (r.platform !== 'android') throw new Error('invalid platform');
+  if (typeof r.latestVersion !== 'string' || typeof r.minimumVersion !== 'string') {
+    throw new Error('missing version fields');
+  }
+  const otaRaw = r.ota;
+  return {
+    platform: 'android',
+    latestVersion: r.latestVersion,
+    minimumVersion: r.minimumVersion,
+    forceUpdate: r.forceUpdate === true,
+    apkUrl:
+      typeof r.apkUrl === 'string' && r.apkUrl.length > 0 ? r.apkUrl : undefined,
+    apkName:
+      typeof r.apkName === 'string' && r.apkName.length > 0 ? r.apkName : undefined,
+    sha256:
+      typeof r.sha256 === 'string' && /^[0-9a-fA-F]{64}$/.test(r.sha256)
+        ? r.sha256.toLowerCase()
+        : undefined,
+    releaseNotes: Array.isArray(r.releaseNotes)
+      ? r.releaseNotes.filter((x): x is string => typeof x === 'string')
+      : undefined,
+    publishedAt:
+      typeof r.publishedAt === 'string' && r.publishedAt.length > 0
+        ? r.publishedAt
+        : undefined,
+    ota:
+      typeof otaRaw === 'object' && otaRaw !== null
+        ? {
+            enabled: (otaRaw as Record<string, unknown>).enabled === true,
+            runtimeVersion:
+              typeof (otaRaw as Record<string, unknown>).runtimeVersion === 'string'
+                ? ((otaRaw as Record<string, unknown>).runtimeVersion as string)
+                : undefined,
+          }
+        : undefined,
+  };
+}

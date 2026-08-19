@@ -1,86 +1,68 @@
-# 更新系统（GitHub Releases + Android APK）
+# 更新系统（Cloudflare + expo-updates OTA + Android APK）
 
-更新源是当前 GitHub 仓库（`Minoray803/memeplan`）的公开 Releases。App 只支持
-Android：通过系统安装器在应用内下载并安装 APK。无 OTA（expo-updates 保留但不参与
-本次更新判断，见 `otaUpdater.ts`）。
+更新源是 Cloudflare Worker 的版本检查 API；大版本 APK 存放在 Cloudflare R2；
+小版本（JS 包与静态资源）由 expo-updates（OTA）完成。GitHub 不再作为 APK 的
+发布或下载渠道。
 
 ## 1. 仓库配置（集中定义）
 
-`src/constants/update.ts` 中的 `GITHUB_OWNER` / `GITHUB_REPO` 是唯一出处：
-
-```ts
-export const GITHUB_OWNER = 'Minoray803';
-export const GITHUB_REPO = 'memeplan';
-```
-
-请求的完整 URL 为：
+`src/constants/update.ts` 中的 `UPDATE_API_BASE_URL` 是唯一配置点（默认
+`https://update.example.com`，可通过 `EXPO_PUBLIC_UPDATE_API_URL` 环境变量在
+构建时覆盖）。版本检查走：
 
 ```
-https://api.github.com/repos/Minoray803/memeplan/releases/latest
+GET <UPDATE_API_BASE_URL>/api/version?platform=android
 ```
 
-公开接口、匿名访问、无需 GitHub Token。
+## 2. Worker 返回的版本模型
 
-## 2. 版本判断
+`ServerUpdateInfo`（见 `src/services/update/updateTypes.ts` / `cloudflare/worker/src/version.json`）：
 
-- 当前版本：读取 Android `versionName`（原生模块 `getVersionName`），如
-  `1.0.1`。
-- 最新版本：读取最新 Release 的 `tag_name`，去掉开头的 `v`，如 `v1.2.3 ->
-  1.2.3`。
-- 用真正的数值 semver 比较（`compareVersions`），不是字符串比较：
-  `1.10.0 > 1.9.0`、`1.2.0 > 1.1.9`。
-- 当远程版本 <= 当前版本时，认为没有更新。
+```json
+{
+  "platform": "android",
+  "latestVersion": "2.0.0",
+  "minimumVersion": "1.5.0",
+  "forceUpdate": false,
+  "apkUrl": "https://download.example.com/android/app-2.0.0.apk",
+  "apkName": "app-2.0.0.apk",
+  "sha256": "…（可选，64 位 hex）",
+  "releaseNotes": ["新增 xxx", "修复 xxx"],
+  "publishedAt": "2026-08-19T00:00:00Z",
+  "ota": { "enabled": true, "runtimeVersion": "2" }
+}
+```
 
-## 3. APK 选择（findApkAsset）
+## 3. 版本比较
 
-只考虑 Release assets 中 `.apk` 文件，并按 `APK_NAME_PRIORITY` 排序：
+`compareVersions()`（`src/services/update/updateLogic.ts`）做数值比较，不做
+字符串比较：`10.0.0 > 2.0.0`，`1.10.0 > 1.9.0`。支持 `1.0` / `1.0.0` 兼容。
 
-1. `universal`（通用包，最高优先）
-2. `arm64-v8a`
-3. `armeabi-v7a`
-4. `arm64` / `x86_64` / `x86` / `armeabi`（依次）
-5. 其它通用 `.apk`（最后）
+## 4. 更新判定（`decideUpdate`，纯函数）
 
-自动跳过 `test / debug / source / unsigned / unaligned / proguard` 等开发产物，
-且忽略 source code zip/tar.gz。APK 必须是 GitHub 托管的 https 地址
-（`github.com/.../releases/download/...` 或其重定向到 `objects.githubusercontent.com`），
-绝不从任意第三方主机下载。
+- `currentVersion < minimumVersion` → 强制更新（APK 安装，不可跳过）。
+- 否则 `currentVersion < latestVersion`：
+  - OTA 开启且无新 APK → OTA 小更新。
+  - 否则 → APK 大更新（两者同时存在时以 APK 为准）。
+- 否则 → 已是最新。
 
-## 4. SHA-256（可选）
+## 5. 流程
 
-GitHub 不会自动生成校验和。若发布者提供了下列之一，App 会在下载后校验 SHA-256：
-
-- 同名资产 `<apk>.sha256`
-- `SHA256SUMS` / `sha256sums` / `checksums` 资产中对应 `apk` 的一行
-- Release 说明（`body`）中包含 `<apk>` 的校验和
-
-未提供时不做校验（与现状一致）。
-
-## 5. 检查时机与缓存
-
-- 手动点击“检查更新”：总是立即强制检查（`force=true`），不受缓存影响。
-- 冷启动 / 从后台恢复：最多每 `AUTO_CHECK_INTERVAL_MS`（6 小时）请求一次 GitHub。
-- 所有更新都是非强制更新，用户随时可点“稍后”。
+- 冷启动 / 从后台恢复最多每 `AUTO_CHECK_INTERVAL_MS`（6 小时）检查一次；用户
+  可在设置页“检查更新”强制检查。
+- 小更新：`expo-updates`（`otaUpdater.ts`）下载 JS 包并 `reloadAsync` 就地热更新。
+- 大更新：`apkUpdater.ts` 通过原生 `AppUpdater` 模块下载、SHA-256 校验并调用
+  系统安装器安装。
+- 强制更新：`UpdateDialog` 隐藏“稍后”，且不可被撤销。
 
 ## 6. 错误处理
 
-- `403 / 429`：GitHub rate limit —— 提示“请求过于频繁，请稍后再试”。
-- 网络断开 / DNS：`network` —— 提示检查网络。
-- 超时：`timeout`。
-- JSON 解析失败：`parse`。
-- 404（仓库不存在或暂无 Release）：`no_release`。
-- 最新 Release 没有 APK：`no_apk`。
+任何失败都 `try/catch`，`console.warn` 后不崩溃、不阻塞正常使用。错误码集中
+在 `updateTypes.ts`：`network` / `timeout` / `http` / `parse` / `no_release` /
+`unsupported`。
 
-错误码与文案见 `src/services/update/updateTypes.ts`（`defaultUpdateErrorMessage`）。
+## 7. 发布
 
-## 7. 发布流程（CI）
-
-`.github/workflows/build-and-upload-apk.yml` 在打 tag 时构建 APK，计算 SHA-256，
-用 `gh release create` 发布 GitHub Release，并把 APK 与 `<apk>.sha256` 作为资产
-附加，同时在 Release 说明中附带校验和（供第 4 步使用）。
-
-## 8. 测试
-
-见下文“修改的文件”说明；逻辑（semver 比较 / APK 选择 / 错误映射）可用纯 JS 验证，
-完整下载-安装需在 Android release 构建（.apk）中验证（Expo Go / 开发构建不可用原生
-安装模块）。
+见根目录 `README.md` 与 `scripts/release-android.ts`。GitHub Actions 只作为
+构建机：构建出的 APK 上传到 Cloudflare R2，并更新 Worker 的 KV 版本元数据
+（`.github/workflows/build-and-upload-apk.yml`）。

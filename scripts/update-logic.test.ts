@@ -1,18 +1,22 @@
 /**
- * Executable unit test for the pure update logic (semver comparison, APK
- * selection, SHA-256 parsing, GitHub URL trust).
+ * Executable unit test for the pure update logic (semver comparison, update
+ * decision, server payload parsing, HTTP status mapping, SHA-256 parsing).
  *
  * Run with Node 24+ (native TS type-stripping):
  *   node --experimental-strip-types scripts/update-logic.test.ts
+ *
+ * The package.json "test:update-logic" script compiles this with tsc and runs
+ * the resulting JS against the pure logic modules.
  */
 import {
   compareVersions,
-  findApkAsset,
+  decideUpdate,
   hashForApkFromText,
-  isGithubAssetUrl,
+  isHttpsUrl,
+  mapServerStatusToCode,
+  parseServerUpdateInfoRaw,
   stripLeadingV,
 } from '../src/services/update/updateLogic';
-import type { GitHubRelease, GitHubReleaseAsset } from '../src/services/update/updateTypes';
 
 let failures = 0;
 function assert(cond: boolean, label: string): void {
@@ -24,67 +28,89 @@ function assert(cond: boolean, label: string): void {
   }
 }
 
-function asset(name: string): GitHubReleaseAsset {
-  return {
-    name,
-    browserDownloadUrl: `https://github.com/Minoray803/memeplan/releases/download/v1.2.3/${name}`,
-    size: 100,
-    contentType: 'application/vnd.android.package-archive',
-  };
-}
-
-function release(assets: GitHubReleaseAsset[], tag = 'v1.2.3'): GitHubRelease {
-  return { tagName: tag, name: 'r', body: null, htmlUrl: 'https://github.com/x/y/releases/tag/v1.2.3', publishedAt: null, assets };
-}
-
 // ---- Version comparison --------------------------------------------------
 console.log('compareVersions:');
-assert(compareVersions('1.2.3', '1.2.3') === 0, 'current == latest (equal)');
-assert(compareVersions('1.2.0', '1.2.3') === -1, 'current < latest');
-assert(compareVersions('1.2.4', '1.2.3') === 1, 'current > latest');
-assert(compareVersions('1.2.3', '1.2.4') === -1, '1.2.3 < 1.2.4');
+assert(compareVersions('1.0.0', '1.0.1') === -1, '1.0.0 < 1.0.1');
+assert(compareVersions('1.0.1', '1.0.0') === 1, '1.0.1 > 1.0.0');
+assert(compareVersions('1.0.0', '1.0.0') === 0, '1.0.0 == 1.0.0 (equal)');
 assert(compareVersions('1.9.0', '1.10.0') === -1, '1.9.0 < 1.10.0 (numeric, not string)');
-assert(compareVersions('1.2.0', '1.1.9') === 1, '1.2.0 > 1.1.9');
+assert(compareVersions('10.0.0', '2.0.0') === 1, '10.0.0 > 2.0.0');
 assert(compareVersions('v1.2.3', '1.2.3') === 0, 'v-prefix ignored in compare');
-assert(compareVersions('10.0.0', '9.9.9') === 1, '10.0.0 > 9.9.9');
+assert(compareVersions('1.2', '1.2.0') === 0, '1.2 == 1.2.0 (compatible)');
 
 console.log('stripLeadingV:');
 assert(stripLeadingV('v1.2.3') === '1.2.3', 'v1.2.3 -> 1.2.3');
 assert(stripLeadingV('1.2.3') === '1.2.3', '1.2.3 unchanged');
 assert(stripLeadingV('V1.2.3') === '1.2.3', 'upper V removed');
 
-// ---- APK selection -------------------------------------------------------
-console.log('findApkAsset:');
-assert(findApkAsset(release([])) === null, 'no APK -> null');
+// ---- Update decision -----------------------------------------------------
+console.log('decideUpdate:');
 assert(
-  findApkAsset(release([asset('memeplan-1.2.3-sources.zip'), asset('Source code.zip')])) === null,
-  'source zips are ignored (no APK)',
+  decideUpdate({ currentVersion: '1.0.0', latestVersion: '2.0.0', minimumVersion: '1.5.0', otaEnabled: true, hasApk: true }).kind === 'force_apk',
+  'current < minimum -> force_apk (forced update)',
 );
 assert(
-  findApkAsset(release([asset('memeplan-1.2.3.apk')]))?.name === 'memeplan-1.2.3.apk',
-  'single apk selected',
+  decideUpdate({ currentVersion: '1.0.0', latestVersion: '2.0.0', minimumVersion: '1.5.0', otaEnabled: true, hasApk: false }).kind === 'requires_apk_without_url',
+  'current < minimum but no apk -> requires_apk_without_url',
 );
-{
-  const picked = findApkAsset(
-    release([asset('memeplan-1.2.3-arm64-v8a.apk'), asset('memeplan-1.2.3-universal.apk'), asset('memeplan-1.2.3-armeabi-v7a.apk')]),
-  );
-  assert(picked?.name === 'memeplan-1.2.3-universal.apk', 'universal preferred over ABIs');
-}
-{
-  const picked = findApkAsset(release([asset('memeplan-1.2.3-arm64-v8a.apk'), asset('memeplan-1.2.3-armeabi-v7a.apk')]));
-  assert(picked?.name === 'memeplan-1.2.3-arm64-v8a.apk', 'arm64-v8a preferred over armeabi-v7a');
-}
-{
-  const picked = findApkAsset(release([asset('memeplan-1.2.3-test.apk'), asset('memeplan-1.2.3.apk')]));
-  assert(picked?.name === 'memeplan-1.2.3.apk', 'test/debug apk skipped');
-}
+assert(
+  decideUpdate({ currentVersion: '1.0.0', latestVersion: '2.0.0', minimumVersion: '1.0.0', otaEnabled: false, hasApk: true }).kind === 'apk',
+  'current < latest -> apk (large update wins)',
+);
+assert(
+  decideUpdate({ currentVersion: '1.0.0', latestVersion: '2.0.0', minimumVersion: '1.0.0', otaEnabled: true, hasApk: false }).kind === 'ota',
+  'current < latest, ota enabled, no apk -> ota (small update)',
+);
+assert(
+  decideUpdate({ currentVersion: '2.0.0', latestVersion: '2.0.0', minimumVersion: '1.5.0', otaEnabled: true, hasApk: false }).kind === 'latest',
+  'current == latest -> latest',
+);
+assert(
+  decideUpdate({ currentVersion: '2.1.0', latestVersion: '2.0.0', minimumVersion: '1.5.0', otaEnabled: true, hasApk: true }).kind === 'latest',
+  'current > latest -> latest',
+);
+assert(
+  decideUpdate({ currentVersion: '1.0.0', latestVersion: '2.0.0', minimumVersion: '1.5.0', otaEnabled: false, hasApk: true }).kind === 'force_apk',
+  'forced update ignores otaEnabled (apk required)',
+);
 
-// ---- GitHub URL trust ----------------------------------------------------
-console.log('isGithubAssetUrl:');
-assert(isGithubAssetUrl('https://github.com/a/b/releases/download/v1/a.apk') === true, 'github.com allowed');
-assert(isGithubAssetUrl('https://objects.githubusercontent.com/x/y') === true, 'objects.githubusercontent.com allowed');
-assert(isGithubAssetUrl('http://github.com/a/b/v1/a.apk') === false, 'http rejected');
-assert(isGithubAssetUrl('https://evil.example.com/a.apk') === false, 'foreign host rejected');
+// ---- HTTP status mapping (server failure path) ---------------------------
+console.log('mapServerStatusToCode:');
+assert(mapServerStatusToCode(404) === 'no_release', '404 -> no_release');
+assert(mapServerStatusToCode(500) === 'http', '500 -> http');
+assert(mapServerStatusToCode(403) === 'http', '403 -> http (no rate-limit-specific code)');
+
+// ---- HTTPS URL trust -----------------------------------------------------
+console.log('isHttpsUrl:');
+assert(isHttpsUrl('https://download.example.com/android/app-1.2.3.apk') === true, 'https allowed');
+assert(isHttpsUrl('http://example.com/a.apk') === false, 'http rejected');
+assert(isHttpsUrl('not-a-url') === false, 'invalid url rejected');
+
+// ---- Server payload parsing (server JSON error path) ---------------------
+console.log('parseServerUpdateInfoRaw:');
+assert(
+  parseServerUpdateInfoRaw({ platform: 'android', latestVersion: '2.0.0', minimumVersion: '1.5.0', apkUrl: 'https://x/a.apk' }).latestVersion === '2.0.0',
+  'valid payload parses',
+);
+assert(
+  parseServerUpdateInfoRaw({ platform: 'android', latestVersion: '2.0.0', minimumVersion: '1.5.0', ota: { enabled: true } }).ota?.enabled === true,
+  'ota metadata parsed',
+);
+{
+  let threw = false;
+  try { parseServerUpdateInfoRaw({ platform: 'ios', latestVersion: '2.0.0', minimumVersion: '1.5.0' }); } catch { threw = true; }
+  assert(threw, 'invalid platform throws (server JSON error)');
+}
+{
+  let threw = false;
+  try { parseServerUpdateInfoRaw({ platform: 'android' }); } catch { threw = true; }
+  assert(threw, 'missing version fields throws (server JSON error)');
+}
+{
+  let threw = false;
+  try { parseServerUpdateInfoRaw(null); } catch { threw = true; }
+  assert(threw, 'null payload throws (server JSON error)');
+}
 
 // ---- SHA-256 parsing -----------------------------------------------------
 console.log('hashForApkFromText:');
