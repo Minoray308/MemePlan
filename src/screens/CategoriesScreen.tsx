@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, BackHandler, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useStore } from '../state/StoreProvider';
@@ -13,9 +13,11 @@ import { Icon, CategoryIcon } from '../components/Icon';
 import { SelectionBar } from '../components/SelectionBar';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CategoryPicker } from '../components/CategoryPicker';
+import { ImportSourceSheet } from '../components/ImportSourceSheet';
 import { exportStickers } from '../services/shareService';
 import { saveStickersToGallery } from '../services/saveService';
-import { getChildren, getDescendantIds } from '../utils/category';
+import { MediaPermissionError, type ImportSourceKey } from '../services/importService';
+import { getChildren, getDescendantIds, getVisibleChildren } from '../utils/category';
 import type { Category as CategoryModel } from '../models/types';
 
 type Props = { navigation: TabNavigationProp<'Categories'> };
@@ -28,6 +30,9 @@ export function CategoriesScreen({ navigation }: Props) {
     categories,
     settings,
     loaded,
+    importFromLibrary,
+    importFromFiles,
+    importFromClipboard,
     touchSticker,
     deleteStickers,
     moveStickersToCategory,
@@ -50,6 +55,11 @@ export function CategoriesScreen({ navigation }: Props) {
   const [showDeleteCat, setShowDeleteCat] = useState(false);
   const [showDeleteStickers, setShowDeleteStickers] = useState(false);
   const [showCategoryPick, setShowCategoryPick] = useState(false);
+  const [childrenExpanded, setChildrenExpanded] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importSource, setImportSource] = useState<ImportSourceKey | null>(null);
+  const [importProgress, setImportProgress] = useState({ done: 0, total: 0 });
 
   const currentCategory = useMemo(
     () => categories.find((c) => c.id === currentFolderId) || null,
@@ -61,6 +71,14 @@ export function CategoriesScreen({ navigation }: Props) {
     () => (currentFolderId ? getChildren(categories, currentFolderId) : []),
     [categories, currentFolderId],
   );
+  const visibleChildFolders = useMemo(
+    () => getVisibleChildren(childFolders, childrenExpanded),
+    [childFolders, childrenExpanded],
+  );
+
+  useEffect(() => {
+    setChildrenExpanded(false);
+  }, [currentFolderId]);
 
   const directStickers = useMemo(
     () => stickers.filter((s) => s.categoryId === currentFolderId),
@@ -103,6 +121,52 @@ export function CategoriesScreen({ navigation }: Props) {
       toast.success('已更新分类');
     },
     [selectedStickers.length, selectedIds, moveStickersToCategory, exitSelection, toast],
+  );
+
+  const runImport = useCallback(
+    async (source: ImportSourceKey) => {
+      if (!currentFolderId) return;
+      setImporting(true);
+      setImportSource(source);
+      setImportProgress({ done: 0, total: 0 });
+      try {
+        const onProgress = (_picked: number, done: number, total: number) =>
+          setImportProgress({ done, total });
+        const options = { multiple: true, onProgress, categoryId: currentFolderId };
+        const result =
+          source === 'library'
+            ? await importFromLibrary(options)
+            : source === 'files'
+              ? await importFromFiles(options)
+              : await importFromClipboard(options);
+
+        const message: string[] = [];
+        if (result.imported.length) message.push(`已添加 ${result.imported.length} 张`);
+        if (result.duplicates) message.push(`跳过 ${result.duplicates} 张重复`);
+        if (result.failed) message.push(`${result.failed} 张失败`);
+        if (message.length) toast.success(message.join('，'));
+        else if (source === 'clipboard') toast.info('剪贴板中没有图片');
+        else toast.info('没有可添加的图片');
+      } catch (error) {
+        console.warn('[categories] import failed', error);
+        if (error instanceof MediaPermissionError) toast.error('需要相册权限才能添加');
+        else if (source === 'clipboard') toast.error('添加失败，请检查剪贴板内容');
+        else toast.error('添加失败，请重试');
+      } finally {
+        setImporting(false);
+        setImportSource(null);
+        setImportProgress({ done: 0, total: 0 });
+      }
+    },
+    [currentFolderId, importFromLibrary, importFromFiles, importFromClipboard, toast],
+  );
+
+  const handleSelectImport = useCallback(
+    (source: ImportSourceKey) => {
+      setShowImport(false);
+      void runImport(source);
+    },
+    [runImport],
   );
 
   const handleSaveToAlbum = useCallback(async () => {
@@ -207,9 +271,18 @@ export function CategoriesScreen({ navigation }: Props) {
             onDragSelect={selection.toggleForDrag}
             ListHeaderComponent={
               <View style={styles.folderHeader}>
-                <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>子分类</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
-                  {childFolders.map((child) => (
+                <View style={styles.sectionHeading}>
+                  <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>子分类</Text>
+                  {childFolders.length > 4 && (
+                    <Pressable onPress={() => setChildrenExpanded((expanded) => !expanded)} hitSlop={8}>
+                      <Text style={[styles.expandText, { color: theme.colors.primary }]}>
+                        {childrenExpanded ? '收起' : `展开全部 (${childFolders.length})`}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+                <View style={styles.folderRow}>
+                  {visibleChildFolders.map((child) => (
                     <Pressable
                       key={child.id}
                       onPress={() => openCategory(child)}
@@ -222,10 +295,15 @@ export function CategoriesScreen({ navigation }: Props) {
                   {childFolders.length === 0 && (
                     <Text style={{ color: theme.colors.textMuted, paddingVertical: 12 }}>暂无子分类</Text>
                   )}
-                </ScrollView>
-                <Pressable onPress={() => setShowCreate(true)} style={[styles.newFolderBtn, { backgroundColor: theme.colors.primarySoft }]}>
-                  <Text style={{ color: theme.colors.primary, fontSize: 14, fontWeight: '700' }}>＋ 新建子分类</Text>
-                </Pressable>
+                </View>
+                <View style={styles.folderActions}>
+                  <Pressable onPress={() => setShowImport(true)} style={[styles.folderActionBtn, { backgroundColor: theme.colors.primary }]}>
+                    <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>＋ 添加表情包</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setShowCreate(true)} style={[styles.folderActionBtn, { backgroundColor: theme.colors.primarySoft }]}>
+                    <Text style={{ color: theme.colors.primary, fontSize: 14, fontWeight: '700' }}>新建子分类</Text>
+                  </Pressable>
+                </View>
               </View>
             }
             ListEmptyComponent={
@@ -270,6 +348,32 @@ export function CategoriesScreen({ navigation }: Props) {
           onClose={() => setShowCategoryPick(false)}
           title="移动到分类"
         />
+
+        <ImportSourceSheet
+          visible={showImport}
+          onClose={() => setShowImport(false)}
+          onSelect={handleSelectImport}
+        />
+
+        <Modal transparent visible={importing} animationType="fade">
+          <View style={styles.importOverlay}>
+            <View style={[styles.importCard, { backgroundColor: theme.colors.card }]}>
+              <ActivityIndicator color={theme.colors.primary} />
+              <Text style={[styles.importTitle, { color: theme.colors.text }]}>
+                {importProgress.total > 0
+                  ? '正在添加表情包…'
+                  : importSource === 'files'
+                    ? '正在打开文件…'
+                    : importSource === 'clipboard'
+                      ? '正在读取剪贴板…'
+                      : '正在打开相册…'}
+              </Text>
+              <Text style={[styles.importSub, { color: theme.colors.textSecondary }]}>
+                {importProgress.total > 0 ? `${importProgress.done} / ${importProgress.total}` : '请选择图片'}
+              </Text>
+            </View>
+          </View>
+        </Modal>
 
         <CreateCategoryModal
           visible={showCreate}
@@ -529,8 +633,10 @@ const styles = StyleSheet.create({
   catName: { fontSize: 16, fontWeight: '700' },
   catCount: { fontSize: 13, marginTop: 2 },
   folderHeader: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6 },
-  sectionLabel: { fontSize: 12, fontWeight: '700', marginBottom: 8 },
-  folderRow: { gap: 10, alignItems: 'center', paddingBottom: 10 },
+  sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  sectionLabel: { fontSize: 12, fontWeight: '700' },
+  expandText: { fontSize: 13, fontWeight: '700' },
+  folderRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center', paddingBottom: 10 },
   folderChip: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -541,7 +647,12 @@ const styles = StyleSheet.create({
     minWidth: 84,
   },
   folderChipText: { fontSize: 14, fontWeight: '700', marginTop: 4 },
-  newFolderBtn: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10, marginTop: 4 },
+  folderActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  folderActionBtn: { flex: 1, alignItems: 'center', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 10 },
+  importOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  importCard: { paddingHorizontal: 36, paddingVertical: 28, borderRadius: 20, alignItems: 'center' },
+  importTitle: { fontSize: 16, fontWeight: '700', marginTop: 14 },
+  importSub: { fontSize: 13, marginTop: 6 },
   manageSheetWrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, justifyContent: 'flex-end' },
   manageSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 16 },
   manageTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 14 },

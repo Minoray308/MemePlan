@@ -10,6 +10,15 @@ export function getChildren(categories: Category[], parentId: string | null): Ca
   return categories.filter((c) => (c.parentId ?? null) === parentId);
 }
 
+/** Shows a compact preview until the child-category section is expanded. */
+export function getVisibleChildren(
+  children: Category[],
+  expanded: boolean,
+  collapsedLimit = 4,
+): Category[] {
+  return expanded ? children : children.slice(0, collapsedLimit);
+}
+
 /** Returns the folder id plus all descendant folder ids. */
 export function getDescendantIds(categoryId: string, categories: Category[]): string[] {
   const result: string[] = [];

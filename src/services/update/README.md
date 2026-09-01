@@ -1,68 +1,34 @@
-# 更新系统（Cloudflare + expo-updates OTA + Android APK）
+# 更新系统（GitHub Releases + Expo 原生安装器）
 
-更新源是 Cloudflare Worker 的版本检查 API；大版本 APK 存放在 Cloudflare R2；
-小版本（JS 包与静态资源）由 expo-updates（OTA）完成。GitHub 不再作为 APK 的
-发布或下载渠道。
+更新源与 Kazumi 保持一致：客户端请求 GitHub `releases/latest`，读取 Release 的
+`tag_name`、`body` 和 APK `assets`，用数值方式比较当前版本。检测到更高版本后，
+Android development/release build 通过 `AppUpdater` 下载并校验 APK，再交给系统安装器。
 
-## 1. 仓库配置（集中定义）
+## 配置
 
-`src/constants/update.ts` 中的 `UPDATE_API_BASE_URL` 是唯一配置点（默认
-`https://update.example.com`，可通过 `EXPO_PUBLIC_UPDATE_API_URL` 环境变量在
-构建时覆盖）。版本检查走：
+默认仓库为 `Minoray308/MemePlan`，可在构建时用 `EXPO_PUBLIC_GITHUB_REPOSITORY`
+覆盖，例如 `Predidit/Kazumi`。检查地址为：
 
 ```
-GET <UPDATE_API_BASE_URL>/api/version?platform=android
+https://api.github.com/repos/<owner>/<repo>/releases/latest
 ```
 
-## 2. Worker 返回的版本模型
+Release 至少需要一个 `.apk` asset；Release body 会显示为更新日志。APK 下载地址
+必须是 GitHub 返回的 HTTPS `browser_download_url`。Expo Go 没有 `AppUpdater` 原生
+模块，因此只会提示当前环境不支持安装。
 
-`ServerUpdateInfo`（见 `src/services/update/updateTypes.ts` / `cloudflare/worker/src/version.json`）：
+## 检查流程
 
-```json
-{
-  "platform": "android",
-  "latestVersion": "2.0.0",
-  "minimumVersion": "1.5.0",
-  "forceUpdate": false,
-  "apkUrl": "https://download.example.com/android/app-2.0.0.apk",
-  "apkName": "app-2.0.0.apk",
-  "sha256": "…（可选，64 位 hex）",
-  "releaseNotes": ["新增 xxx", "修复 xxx"],
-  "publishedAt": "2026-08-19T00:00:00Z",
-  "ota": { "enabled": true, "runtimeVersion": "2" }
-}
+冷启动和回到前台每 6 小时自动检查一次；设置页的“检查更新”会绕过缓存强制检查。
+当前版本低于 Release tag 时提示更新，用户选择“立即更新”后下载 APK、显示进度并打开
+Android 系统安装器。普通更新可选择稍后；下载失败不会影响当前应用继续使用。
+
+## 发布
+
+构建 APK 后创建 GitHub Release，并将 APK 上传为 Release asset，例如：
+
+```
+memeplan-1.0.3.apk
 ```
 
-## 3. 版本比较
-
-`compareVersions()`（`src/services/update/updateLogic.ts`）做数值比较，不做
-字符串比较：`10.0.0 > 2.0.0`，`1.10.0 > 1.9.0`。支持 `1.0` / `1.0.0` 兼容。
-
-## 4. 更新判定（`decideUpdate`，纯函数）
-
-- `currentVersion < minimumVersion` → 强制更新（APK 安装，不可跳过）。
-- 否则 `currentVersion < latestVersion`：
-  - OTA 开启且无新 APK → OTA 小更新。
-  - 否则 → APK 大更新（两者同时存在时以 APK 为准）。
-- 否则 → 已是最新。
-
-## 5. 流程
-
-- 冷启动 / 从后台恢复最多每 `AUTO_CHECK_INTERVAL_MS`（6 小时）检查一次；用户
-  可在设置页“检查更新”强制检查。
-- 小更新：`expo-updates`（`otaUpdater.ts`）下载 JS 包并 `reloadAsync` 就地热更新。
-- 大更新：`apkUpdater.ts` 通过原生 `AppUpdater` 模块下载、SHA-256 校验并调用
-  系统安装器安装。
-- 强制更新：`UpdateDialog` 隐藏“稍后”，且不可被撤销。
-
-## 6. 错误处理
-
-任何失败都 `try/catch`，`console.warn` 后不崩溃、不阻塞正常使用。错误码集中
-在 `updateTypes.ts`：`network` / `timeout` / `http` / `parse` / `no_release` /
-`unsupported`。
-
-## 7. 发布
-
-见根目录 `README.md` 与 `scripts/release-android.ts`。GitHub Actions 只作为
-构建机：构建出的 APK 上传到 Cloudflare R2，并更新 Worker 的 KV 版本元数据
-（`.github/workflows/build-and-upload-apk.yml`）。
+不再需要 Cloudflare Worker/R2 的版本元数据作为客户端更新源。

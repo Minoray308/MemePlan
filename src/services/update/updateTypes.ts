@@ -1,12 +1,10 @@
 /**
- * Types for the update system. The source of truth is the Cloudflare
- * version-check API (see src/services/update/updateApi.ts); a newer build is
+ * Types for the update system. The source of truth is the GitHub Releases\r`n * API (see src/services/update/updateApi.ts); a newer build is
  * decided by numeric semver comparison of the running versionName against the
- * API's latest/minimum versions. Small (JS) updates go through expo-updates
- * (OTA); large updates install an APK downloaded from Cloudflare R2.
+ * API's latest/minimum versions. The latest release APK is downloaded through the native Android installer.
  */
 
-/** The payload returned by the Cloudflare Worker (see cloudflare/worker/src). */
+/** Normalized payload returned by the GitHub Releases API. */
 export interface ServerUpdateInfo {
   platform: 'android';
   latestVersion: string;
@@ -17,10 +15,9 @@ export interface ServerUpdateInfo {
   sha256?: string;
   releaseNotes?: string[];
   publishedAt?: string;
-  ota?: {
-    enabled: boolean;
-    runtimeVersion?: string;
-  };
+  releaseUrl?: string;
+  /** Legacy metadata accepted by the pure parser for backwards compatibility. */
+  ota?: { enabled: boolean; runtimeVersion?: string };
 }
 
 /** How an available update is delivered to an Android device. */
@@ -100,6 +97,7 @@ export interface AppUpdateInfo {
   releaseTitle?: string;
   /** ISO publish timestamp of the newest build, if provided. */
   publishedAt?: string;
+  releaseUrl?: string;
 }
 
 /**

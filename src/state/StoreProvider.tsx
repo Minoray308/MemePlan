@@ -30,6 +30,7 @@ import {
 import { deleteStickerFiles } from '../services/fileService';
 import { overlayTagKey } from '../constants/overlay';
 import { uuid } from '../utils/id';
+import { assignCategoryToImportResult } from '../services/importLogic';
 
 export interface VirtualCategory {
   id: string;
@@ -45,6 +46,7 @@ export type ImportProgressCallback = (picked: number, done: number, total: numbe
 export interface ImportCallOptions {
   multiple?: boolean;
   onProgress?: ImportProgressCallback;
+  categoryId?: string | null;
 }
 
 export interface StoreValue {
@@ -210,11 +212,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const commitImport = useCallback(
-    async (assets: PickedImage[], onProgress?: ImportProgressCallback) => {
-      const result = await importAssets(assets, stickersRef.current, {
-        onProgress,
+    async (assets: PickedImage[], options?: ImportCallOptions) => {
+      const rawResult = await importAssets(assets, stickersRef.current, {
+        onProgress: options?.onProgress,
         generateThumbnails: settingsRef.current.generateThumbnails,
       });
+      const result = assignCategoryToImportResult(rawResult, options?.categoryId);
       if (result.imported.length) {
         setStickersPersist((prev) => [...result.imported, ...prev]);
       }
@@ -227,7 +230,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     async (opts?: ImportCallOptions) => {
       const assets = await pickImagesFromLibrary({ allowsMultiple: opts?.multiple ?? true });
       if (!assets.length) return EMPTY_RESULT;
-      return commitImport(assets, opts?.onProgress);
+      return commitImport(assets, opts);
     },
     [commitImport],
   );
@@ -236,7 +239,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     async (opts?: ImportCallOptions) => {
       const assets = await pickImagesFromFiles({ multiple: opts?.multiple ?? true });
       if (!assets.length) return EMPTY_RESULT;
-      return commitImport(assets, opts?.onProgress);
+      return commitImport(assets, opts);
     },
     [commitImport],
   );
@@ -245,7 +248,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     async (opts?: ImportCallOptions) => {
       const asset = await pickImageFromClipboard();
       if (!asset) return EMPTY_RESULT;
-      return commitImport([asset], opts?.onProgress);
+      return commitImport([asset], opts);
     },
     [commitImport],
   );

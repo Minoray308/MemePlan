@@ -1,47 +1,28 @@
-# Build an Android APK on the GitHub runner (no EAS), then publish it to
-# Cloudflare: the APK is uploaded to R2 and the version-check metadata is
-# stored in the Worker's KV namespace.
-#
-# GitHub is used ONLY as the build runner — it is no longer an APK publish or
-# download channel. The APK is served directly from R2 + the Cloudflare CDN,
-# and the Worker returns the version info (see cloudflare/worker).
-#
-# Triggers:
-#   - manual: Actions tab -> "Run workflow" (set the "version" input)
-#
-# Required repository Secrets:
-#   CLOUDFLARE_ACCOUNT_ID        (Cloudflare account id)
-#   CLOUDFLARE_API_TOKEN         (token with Workers KV:Write + R2:Admin edit)
-#   R2_BUCKET_NAME               (R2 bucket that holds the APKs)
-#   R2_PUBLIC_URL                (public base URL of the bucket, e.g. https://download.example.com)
-#   CLOUDFLARE_KV_NAMESPACE_ID   (KV namespace used by the Worker's VERSION_KV binding)
-
-name: Build & Publish Android APK to Cloudflare
+name: Build & Publish Android APK Release
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. 2.0.0"
+        description: "Version to release, e.g. 1.0.3"
         required: true
+        type: string
+      notes:
+        description: "Release notes"
+        required: false
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: apk-release
+  group: android-release
   cancel-in-progress: false
 
 jobs:
-  build-and-publish:
-    name: Build APK and publish to Cloudflare R2
+  build-and-release:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_KV_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_KV_NAMESPACE_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,102 +42,33 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Resolve version
-        id: version
+      - name: Resolve release metadata
         run: |
-          set -euo pipefail
-          VERSION="${{ github.event.inputs.version }}"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "${VERSION}"
-          VERSION_CODE=$(( MAJOR * 1000000 + MINOR * 1000 + PATCH ))
-          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
-          echo "VERSION_CODE=${VERSION_CODE}" >> "${GITHUB_ENV}"
-          echo "APK_NAME=memeplan-${VERSION}.apk" >> "${GITHUB_ENV}"
+          VERSION="${{ inputs.version }}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH))" >> "$GITHUB_ENV"
+          echo "APK_NAME=memeplan-$VERSION.apk" >> "$GITHUB_ENV"
 
-      - name: Patch app.json to the release version
+      - name: Patch app.json version
         run: |
-          set -euo pipefail
-          node - <<'NODE'
-          const fs = require('fs');
-          const path = 'app.json';
-          const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
-          cfg.expo.version = process.env.VERSION;
-          cfg.expo.android = cfg.expo.android || {};
-          cfg.expo.android.versionCode = Number(process.env.VERSION_CODE);
-          fs.writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
-          console.log('patched app.json version=' + cfg.expo.version + ' versionCode=' + cfg.expo.android.versionCode);
-          NODE
-        env:
-          VERSION: ${{ env.VERSION }}
-          VERSION_CODE: ${{ env.VERSION_CODE }}
+          node -e 'const fs=require("fs"); const p="app.json"; const c=JSON.parse(fs.readFileSync(p)); c.expo.version=process.env.VERSION; c.expo.android={...(c.expo.android||{}),versionCode:Number(process.env.VERSION_CODE)}; fs.writeFileSync(p,JSON.stringify(c,null,2)+"\n")'
 
-      - name: Generate native project (Expo prebuild)
+      - name: Generate native project
         run: npx expo prebuild --platform android --no-install
 
-      - name: Build release APK with Gradle
-        run: |
-          set -euo pipefail
-          cd android
-          ./gradlew assembleRelease --no-daemon --stacktrace
-          find app/build/outputs/apk -name "*.apk" -type f
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
 
-      - name: Collect APK and compute SHA-256
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          APK_SRC="$(find android/app/build/outputs/apk -name "app-release.apk" -type f | head -n 1)"
-          test -n "${APK_SRC}" || { echo "::error::app-release.apk not found"; exit 1; }
-          cp "${APK_SRC}" "dist/${APK_NAME}"
-          SHA256="$(sha256sum "dist/${APK_NAME}" | awk '{print $1}')"
-          echo "SHA256=${SHA256}" >> "${GITHUB_ENV}"
-          echo "APK=${APK_NAME} SHA256=${SHA256}"
+      - name: Collect APK
+        run: cp "$(find android/app/build/outputs/apk -name app-release.apk -type f | head -n 1)" "dist-$APK_NAME"
 
-      - name: Upload APK to Cloudflare R2
-        run: |
-          set -euo pipefail
-          npx wrangler r2 object put "${R2_BUCKET_NAME}/android/${APK_NAME}" \
-            --file "dist/${APK_NAME}" \
-            --content-type "application/vnd.android.package-archive" \
-            --cache-control "public, max-age=31536000, immutable"
+      - name: Publish GitHub Release
         env:
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-
-      - name: Generate and upload version metadata to KV
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          cat > /tmp/version.json <<JSON
-          {
-            "platform": "android",
-            "latestVersion": "${VERSION}",
-            "minimumVersion": "${MINIMUM_VERSION:-${VERSION}}",
-            "forceUpdate": false,
-            "apkUrl": "${R2_PUBLIC_URL}/android/${APK_NAME}",
-            "apkName": "${APK_NAME}",
-            "sha256": "${SHA256}",
-            "releaseNotes": [
-              "本次发布版本 ${VERSION}"
-            ],
-            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "ota": { "enabled": true, "runtimeVersion": "${VERSION}" }
-          }
-          JSON
-          npx wrangler kv key put android-version \
-            --namespace-id "${CLOUDFLARE_KV_NAMESPACE_ID}" \
-            --path /tmp/version.json --remote
-        env:
-          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-
-      - name: Write Actions summary
-        run: |
-          set -euo pipefail
-          {
-            echo "## Android APK Published to Cloudflare"
-            echo ""
-            echo "**Version:** ${VERSION}"
-            echo ""
-            echo "**APK URL:** ${R2_PUBLIC_URL}/android/${APK_NAME}"
-            echo ""
-            echo "**SHA-256:** ${SHA256}"
-          } >> "${GITHUB_STEP_SUMMARY}"
-        env:
-          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+          gh release create "v$VERSION" "dist-$APK_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "MemePlan v$VERSION" \
+            --notes "${{ inputs.notes || format('MemePlan {0}', inputs.version) }}"

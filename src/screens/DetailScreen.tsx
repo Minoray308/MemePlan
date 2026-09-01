@@ -269,6 +269,7 @@ export function DetailScreen({ navigation, route }: Props) {
         selectedId={sticker.categoryId}
         onApply={(categoryId) => {
           setStickerCategory(sticker.id, categoryId);
+          setShowCategory(false);
           toast.success('分类已更新');
         }}
         onClose={() => setShowCategory(false)}
