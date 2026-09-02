@@ -59,7 +59,7 @@ jobs:
 
       - name: Build release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon
+        run: ./gradlew assembleRelease --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
 
       - name: Collect APK
         run: cp "$(find android/app/build/outputs/apk -name app-release.apk -type f | head -n 1)" "dist-$APK_NAME"
