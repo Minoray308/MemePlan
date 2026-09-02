@@ -104,8 +104,8 @@ function main(): void {
 
   const apkName = `memeplan-${args.version}.apk`;
   const shasum = sha256(apkPath);
-  const accountId = requireEnv('CLOUDFLARE_ACCOUNT_ID');
-  const apiToken = requireEnv('CLOUDFLARE_API_TOKEN');
+  requireEnv('CLOUDFLARE_ACCOUNT_ID');
+  requireEnv('CLOUDFLARE_API_TOKEN');
   const bucket = requireEnv('R2_BUCKET_NAME');
   const publicUrl = requireEnv('R2_PUBLIC_URL').replace(/\/$/, '');
   const kvNamespace = requireEnv('CLOUDFLARE_KV_NAMESPACE_ID');

@@ -48,10 +48,15 @@ export function StickerGrid(props: Props) {
   }, [width, safeColumns]);
 
   const measureVisibleItems = useCallback(() => {
+    // Refresh stale rectangles when measuring, not when inline refs detach
+    // during selection renders: an active drag still needs those rectangles.
+    itemLayouts.current = {};
     Object.entries(itemRefs.current).forEach(([id, ref]) => {
       if (!ref) return;
       ref.measureInWindow((x, y, w, h) => {
-        itemLayouts.current[id] = { x, y, width: w, height: h };
+        if (itemRefs.current[id] === ref && w > 0 && h > 0) {
+          itemLayouts.current[id] = { x, y, width: w, height: h };
+        }
       });
     });
   }, []);
@@ -63,13 +68,7 @@ export function StickerGrid(props: Props) {
     }
     const timer = setTimeout(measureVisibleItems, 80);
     return () => clearTimeout(timer);
-  }, [selectMode, measureVisibleItems]);
-
-  useEffect(() => {
-    if (!selectMode) return;
-    const timer = setTimeout(measureVisibleItems, 120);
-    return () => clearTimeout(timer);
-  }, [stickers, selectMode, measureVisibleItems]);
+  }, [stickers, itemSize, selectMode, measureVisibleItems]);
 
   const handlePoint = useCallback(
     (pageX: number, pageY: number) => {

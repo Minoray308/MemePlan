@@ -19,15 +19,14 @@ import { exportStickers } from '../services/shareService';
 import { saveStickersToGallery } from '../services/saveService';
 import { StickerOverlayService } from '../services/stickerOverlayService';
 import { MediaPermissionError, type ImportSourceKey } from '../services/importService';
-import { getChildren, getDescendantIds } from '../utils/category';
+import { getChildren, getDescendantIds, searchStickers } from '../utils/category';
+import { VIRTUAL_CATEGORY_IDS } from '../constants';
 import { OVERLAY_FILTER_OPTIONS, tagFromOverlayKey } from '../constants/overlay';
-import type { Sticker, StickerFileType } from '../models/types';
+import type { Sticker } from '../models/types';
 
 type Props = { navigation: TabNavigationProp<'Home'> };
 
-const CAT_ALL = 'cat__all';
-const CAT_RECENTS = 'cat__recents';
-const CAT_FAVORITES = 'cat__favorites';
+const { all: CAT_ALL, recents: CAT_RECENTS, favorites: CAT_FAVORITES } = VIRTUAL_CATEGORY_IDS;
 
 interface FilterOption {
   value: string;
@@ -178,8 +177,17 @@ export function HomeScreen({ navigation }: Props) {
     );
   }, [filterTimes, filterFormats, filterSizes, filterTags]);
 
+  const sortedStickers = useMemo(() => {
+    return [...stickers].sort((a, b) => {
+      if (sortValue === 'time_asc') return a.createdAt - b.createdAt;
+      if (sortValue === 'size_desc') return b.fileSize - a.fileSize || b.createdAt - a.createdAt;
+      if (sortValue === 'size_asc') return a.fileSize - b.fileSize || b.createdAt - a.createdAt;
+      return b.createdAt - a.createdAt;
+    });
+  }, [stickers, sortValue]);
+
   const visible = useMemo(() => {
-    let list = stickers;
+    let list = sortedStickers;
 
     if (activeCategory === CAT_RECENTS) {
       list = list.filter((s) => s.lastUsedAt != null);
@@ -190,25 +198,19 @@ export function HomeScreen({ navigation }: Props) {
       list = list.filter((s) => s.categoryId && categoryIds.has(s.categoryId));
     }
 
-    const q = query.trim().toLowerCase();
-    if (q) {
-      list = list.filter((s) => {
-        const nameHit = s.name.toLowerCase().includes(q);
-        const tagHit = s.tags.some((t) => t.toLowerCase().includes(q));
-        const catHit = getChildren(categories, null).some((c) => c.name.toLowerCase().includes(q));
-        return nameHit || tagHit || catHit;
-      });
-    }
+    list = searchStickers(list, categories, query);
 
     if (filterTimes.size) {
+      const values = Array.from(filterTimes);
       const now = Date.now();
       const ranges: Record<string, number> = { '7d': 7 * 86400000, '30d': 30 * 86400000, '1y': 365 * 86400000 };
-      list = list.filter((s) => Array.from(filterTimes).some((v) => s.createdAt >= now - (ranges[v] || 0)));
+      list = list.filter((s) => values.some((v) => s.createdAt >= now - (ranges[v] || 0)));
     }
 
     if (filterFormats.size) {
+      const values = Array.from(filterFormats);
       list = list.filter((s) =>
-        Array.from(filterFormats).some((v) =>
+        values.some((v) =>
           v === 'other'
             ? !['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'].includes(s.fileType)
             : s.fileType === v,
@@ -217,8 +219,9 @@ export function HomeScreen({ navigation }: Props) {
     }
 
     if (filterSizes.size) {
+      const values = Array.from(filterSizes);
       list = list.filter((s) =>
-        Array.from(filterSizes).some((v) => {
+        values.some((v) => {
           if (v === 'small') return s.fileSize < 100 * 1024;
           if (v === 'medium') return s.fileSize >= 100 * 1024 && s.fileSize <= 1024 * 1024;
           return s.fileSize > 1024 * 1024;
@@ -227,8 +230,9 @@ export function HomeScreen({ navigation }: Props) {
     }
 
     if (filterTags.size) {
+      const values = Array.from(filterTags);
       list = list.filter((s) =>
-        Array.from(filterTags).some((v) => {
+        values.some((v) => {
           if (v === 'tagged') return s.tags.length > 0;
           if (v === 'untagged') return s.tags.length === 0;
           return s.tags.includes(v);
@@ -236,13 +240,8 @@ export function HomeScreen({ navigation }: Props) {
       );
     }
 
-    return [...list].sort((a, b) => {
-      if (sortValue === 'time_asc') return a.createdAt - b.createdAt;
-      if (sortValue === 'size_desc') return b.fileSize - a.fileSize || b.createdAt - a.createdAt;
-      if (sortValue === 'size_asc') return a.fileSize - b.fileSize || b.createdAt - a.createdAt;
-      return b.createdAt - a.createdAt;
-    });
-  }, [stickers, activeCategory, query, categories, filterTimes, filterFormats, filterSizes, filterTags, sortValue]);
+    return list;
+  }, [sortedStickers, activeCategory, query, categories, filterTimes, filterFormats, filterSizes, filterTags]);
 
   const runImport = useCallback(
     async (source: ImportSourceKey) => {

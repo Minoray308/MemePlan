@@ -1,6 +1,6 @@
 {
   "name": "memeplan",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "index.ts",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.9",
@@ -40,7 +40,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test:category-flow": "tsc --ignoreConfig scripts/category-flow.test.ts src/utils/category.ts src/services/importLogic.ts src/models/types.ts --outDir tmp-category-test-out --module commonjs --target es2020 --moduleResolution node10 --ignoreDeprecations 6.0 --esModuleInterop --skipLibCheck && node tmp-category-test-out/scripts/category-flow.test.js && node -e \"require('fs').rmSync('tmp-category-test-out',{recursive:true,force:true})\"",
-    "test:update-logic": "tsc --ignoreConfig scripts/update-logic.test.ts src/services/update/updateLogic.ts src/services/update/updateTypes.ts --outDir tmp-test-out --module commonjs --target es2020 --moduleResolution node10 --ignoreDeprecations 6.0 --esModuleInterop --skipLibCheck && node tmp-test-out/scripts/update-logic.test.js && node -e \"require('fs').rmSync('tmp-test-out',{recursive:true,force:true})\""
+    "test:update-logic": "tsc --ignoreConfig scripts/update-logic.test.ts src/services/update/updateLogic.ts src/services/update/updateTypes.ts --outDir tmp-test-out --module commonjs --target es2020 --moduleResolution node10 --ignoreDeprecations 6.0 --esModuleInterop --skipLibCheck && node tmp-test-out/scripts/update-logic.test.js && node -e \"require('fs').rmSync('tmp-test-out',{recursive:true,force:true})\"",
+    "test:app-logic": "node --test scripts/app-logic.test.cjs"
   },
   "private": true
 }

@@ -60,7 +60,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFormatLabel: true,
   animateGifs: true,
   overlayFilters: [...DEFAULT_OVERLAY_FILTERS],
-  exitAfterOverlay: false,
+  exitAfterOverlay: true,
 };
 
 const LEGACY_THEME_COLORS: Record<string, string> = {

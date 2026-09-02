@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. 1.0.3"
+        description: "Version to release, e.g. 1.0.4"
         required: true
         type: string
       notes:
@@ -42,9 +42,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Resolve release metadata
+      - name: Verify app
         run: |
-          VERSION="${{ inputs.version }}"
+          npm run typecheck
+          npm run test:app-logic
+          npm run test:category-flow
+          npm run test:update-logic
+
+      - name: Resolve release metadata
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="$RELEASE_VERSION"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH))" >> "$GITHUB_ENV"
@@ -68,15 +78,23 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
 
       - name: Collect APK
-        run: cp "$(find android/app/build/outputs/apk -name app-release.apk -type f | head -n 1)" "dist-$APK_NAME"
+        run: cp "$(find android/app/build/outputs/apk -name app-release.apk -type f | head -n 1)" "$APK_NAME"
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.notes }}
         run: |
-          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "v$VERSION" "dist-$APK_NAME" --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "MemePlan v$VERSION" --notes "${{ inputs.notes || format('MemePlan {0}', inputs.version) }}"
+          if [ -n "$RELEASE_NOTES" ]; then
+            printf '%s\n' "$RELEASE_NOTES" > release-notes.md
+          elif [ -f "docs/releases/$VERSION.md" ]; then
+            cp "docs/releases/$VERSION.md" release-notes.md
           else
-            gh release create "v$VERSION" "dist-$APK_NAME" --repo "$GITHUB_REPOSITORY" --title "MemePlan v$VERSION" --notes "${{ inputs.notes || format('MemePlan {0}', inputs.version) }}"
+            printf 'MemePlan %s\n' "$VERSION" > release-notes.md
+          fi
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" "$APK_NAME" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "MemePlan v$VERSION" --notes-file release-notes.md
+          else
+            gh release create "v$VERSION" "$APK_NAME" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "MemePlan v$VERSION" --notes-file release-notes.md
           fi

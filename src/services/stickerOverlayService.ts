@@ -71,7 +71,6 @@ export const StickerOverlayService = {
   ): Promise<boolean> {
     if (!StickerOverlayService.isAvailable()) return false;
     const items = overlayItemsFor(stickers, categoryNames);
-    if (items.length === 0) return false;
     return StickerOverlay.show(items, filters);
   },
 

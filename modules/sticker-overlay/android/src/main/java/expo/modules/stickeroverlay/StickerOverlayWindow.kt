@@ -81,7 +81,7 @@ private data class SaveResult(
  * - Tapping a sticker copies it into the dedicated gallery album
  *   "表情包快速发送" using MediaStore (Android 11+ needs no permission to
  *   insert/delete the app's own media).
- * - "已发送" / "关闭" delete ONLY the copy this window created. The original
+ * - "已发送" / "退出" delete ONLY the copy this window created. The original
  *   sticker files in the app documents dir are never touched.
  * - Orphaned copies from a killed process are cleaned on next app start
  *   (see cleanupOrphanedTemps), so the gallery does not fill up.
@@ -103,7 +103,6 @@ class StickerOverlayWindow(
   private var bodyContainer: LinearLayout? = null
   private var searchField: EditText? = null
   private var chipsRow: LinearLayout? = null
-  private var gridScroll: ScrollView? = null
 
   private var items: List<StickerOverlayItem> = emptyList()
   private var searchText = ""
@@ -205,7 +204,6 @@ class StickerOverlayWindow(
     bodyContainer = null
     searchField = null
     chipsRow = null
-    gridScroll = null
     isCollapsed = false
   }
 
@@ -286,7 +284,7 @@ class StickerOverlayWindow(
     val body = bodyContainer ?: return
     body.removeAllViews()
     if (items.isEmpty()) {
-      body.addView(textView(ctx, "没有可发送的表情", 13f, TEXT_SECONDARY, Typeface.NORMAL))
+      body.addView(textView(ctx, "暂无表情包", 13f, TEXT_SECONDARY, Typeface.NORMAL))
       return
     }
     if (results.isEmpty()) {
@@ -316,7 +314,7 @@ class StickerOverlayWindow(
         }
         for (item in chunk) {
           row.addView(
-            gridThumb(ctx, item),
+            stickerThumb(ctx, item),
             LinearLayout.LayoutParams(cell, cell).apply { marginEnd = gap }
           )
         }
@@ -341,7 +339,7 @@ class StickerOverlayWindow(
         gravity = Gravity.CENTER_VERTICAL
       }
       for (item in results.take(6)) {
-        row.addView(rowThumb(ctx, item), LinearLayout.LayoutParams(dp(ctx, 56), dp(ctx, 56)).apply { marginEnd = dp(ctx, 8) })
+        row.addView(stickerThumb(ctx, item), LinearLayout.LayoutParams(dp(ctx, 56), dp(ctx, 56)).apply { marginEnd = dp(ctx, 8) })
       }
       scroll.addView(row)
       body.addView(
@@ -407,7 +405,7 @@ class StickerOverlayWindow(
       setPadding(0, 0, dp(ctx, 8), 0)
     }
     titles.addView(
-      textView(ctx, "快速发送表情", 15f, Color.WHITE, Typeface.BOLD),
+      textView(ctx, "快捷发送", 15f, Color.WHITE, Typeface.BOLD),
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     )
     attachDrag(header)
@@ -531,18 +529,7 @@ class StickerOverlayWindow(
 
   // region Thumbnails
 
-  private fun rowThumb(ctx: Context, item: StickerOverlayItem): ImageView {
-    return ImageView(ctx).apply {
-      scaleType = ImageView.ScaleType.CENTER_CROP
-      background = roundedRect(ctx, COLOR_THUMB_BG, dp(ctx, 10).toFloat())
-      contentDescription = item.name.ifBlank { "表情" }
-      tag = item.path
-      setOnClickListener { onStickerTapped(item.path) }
-      loadThumb(item.path, this)
-    }
-  }
-
-  private fun gridThumb(ctx: Context, item: StickerOverlayItem): ImageView {
+  private fun stickerThumb(ctx: Context, item: StickerOverlayItem): ImageView {
     return ImageView(ctx).apply {
       scaleType = ImageView.ScaleType.CENTER_CROP
       background = roundedRect(ctx, COLOR_THUMB_BG, dp(ctx, 10).toFloat())
@@ -597,9 +584,9 @@ class StickerOverlayWindow(
     val ctx = context ?: return
     val body = bodyContainer ?: return
     body.removeAllViews()
-    body.addView(textView(ctx, "已保存到相册", 15f, Color.WHITE, Typeface.BOLD))
+    body.addView(textView(ctx, "就绪！", 15f, Color.WHITE, Typeface.BOLD))
     body.addView(
-      textView(ctx, "请前往微信等应用，从相册选择图片发送", 12f, TEXT_SECONDARY, Typeface.NORMAL),
+      textView(ctx, "点击社交软件右下角的‘+’发送", 12f, TEXT_SECONDARY, Typeface.NORMAL),
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
         topMargin = dp(ctx, 2)
       }
@@ -607,7 +594,7 @@ class StickerOverlayWindow(
     val row = buttonRow(ctx)
     row.addView(button(ctx, "已发送", COLOR_PRIMARY) { onSentConfirmed() })
     row.addView(button(ctx, "重新保存", COLOR_BTN) { onResave() })
-    row.addView(button(ctx, "关闭", COLOR_CLOSE) { closeWindow() })
+    row.addView(button(ctx, "退出", COLOR_CLOSE) { closeWindow() })
     body.addView(
       row,
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -629,7 +616,7 @@ class StickerOverlayWindow(
     )
     val row = buttonRow(ctx)
     row.addView(button(ctx, "重试", COLOR_PRIMARY) { lastTappedPath?.let { onStickerTapped(it) } })
-    row.addView(button(ctx, "关闭", COLOR_CLOSE) { closeWindow() })
+    row.addView(button(ctx, "退出", COLOR_CLOSE) { closeWindow() })
     body.addView(
       row,
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {

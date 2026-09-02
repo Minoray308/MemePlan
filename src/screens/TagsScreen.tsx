@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { BackHandler, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useStore } from '../state/StoreProvider';
@@ -32,18 +32,21 @@ export function TagsScreen({ navigation }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [createValue, setCreateValue] = useState('');
 
-  const tags = useMemo<TagStat[]>(() => {
+  const tagStats = useMemo<TagStat[]>(() => {
     const map = new Map<string, number>();
     allTags.forEach((tag) => map.set(tag, map.get(tag) || 0));
     stickers.forEach((s) => {
       s.tags.forEach((tag) => map.set(tag, (map.get(tag) || 0) + 1));
     });
-    const q = query.trim().toLowerCase();
     return Array.from(map.entries())
       .map(([tag, count]) => ({ tag, count }))
-      .filter((item) => !q || item.tag.toLowerCase().includes(q))
       .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh'));
-  }, [stickers, allTags, query]);
+  }, [stickers, allTags]);
+
+  const tags = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? tagStats.filter(item => item.tag.toLowerCase().includes(q)) : tagStats;
+  }, [tagStats, query]);
 
   const tagStickers = useMemo(
     () => stickers.filter((s) => selectedTag && s.tags.includes(selectedTag)),

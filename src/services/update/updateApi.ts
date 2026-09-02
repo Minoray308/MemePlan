@@ -3,7 +3,7 @@ import { GITHUB_LATEST_RELEASE_URL, UPDATE_API_TIMEOUT_MS } from '../../constant
 import { AppUpdater } from '../../../modules/app-updater/src';
 import type { AppUpdateInfo, ServerUpdateInfo, UpdateType } from './updateTypes';
 import { UpdateCheckError } from './updateTypes';
-import { isHttpsUrl, stripLeadingV } from './updateLogic';
+import { stripLeadingV } from './updateLogic';
 
 export function getRunningVersionCode(): number | null {
   if (Platform.OS !== 'android') return null;

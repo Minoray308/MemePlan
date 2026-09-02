@@ -31,15 +31,7 @@ import { deleteStickerFiles } from '../services/fileService';
 import { overlayTagKey } from '../constants/overlay';
 import { uuid } from '../utils/id';
 import { assignCategoryToImportResult } from '../services/importLogic';
-
-export interface VirtualCategory {
-  id: string;
-  name: string;
-  icon: string;
-  isVirtual: true;
-}
-
-export type ViewCategory = Category | VirtualCategory;
+import { getDescendantIds } from '../utils/category';
 
 export type ImportProgressCallback = (picked: number, done: number, total: number) => void;
 
@@ -54,9 +46,7 @@ export interface StoreValue {
   categories: Category[];
   settings: Settings;
   loaded: boolean;
-  favorites: Sticker[];
   allTags: string[];
-  viewCategories: ViewCategory[];
   importFromLibrary: (opts?: ImportCallOptions) => Promise<ImportResult>;
   importFromFiles: (opts?: ImportCallOptions) => Promise<ImportResult>;
   importFromClipboard: (opts?: ImportCallOptions) => Promise<ImportResult>;
@@ -117,18 +107,6 @@ function normalizeCategory(raw: Partial<Category>): Category {
     updatedAt: raw.updatedAt || Date.now(),
     isSystem: !!raw.isSystem,
   };
-}
-
-function collectCategoryAndDescendants(categoryId: string, categories: Category[]): string[] {
-  const result: string[] = [];
-  const stack = [categoryId];
-  while (stack.length) {
-    const id = stack.pop();
-    if (!id || result.includes(id)) continue;
-    result.push(id);
-    categories.filter((c) => c.parentId === id).forEach((child) => stack.push(child.id));
-  }
-  return result;
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
@@ -295,9 +273,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const moveStickersToCategory = useCallback(
     (ids: string[], categoryId: string | null) => {
+      if (!ids.length) return;
+      const idSet = new Set(ids);
       setStickersPersist((prev) =>
         prev.map((s) =>
-          ids.includes(s.id) ? { ...s, categoryId, updatedAt: Date.now() } : s,
+          idSet.has(s.id) ? { ...s, categoryId, updatedAt: Date.now() } : s,
         ),
       );
     },
@@ -305,10 +285,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   // Keep the floating window filter list in sync with the tags that exist.
-  const ensureOverlayFilter = useCallback((key: string) => {
+  const ensureOverlayFilters = useCallback((keys: string[]) => {
     setSettings((prev) => {
-      if (prev.overlayFilters.includes(key)) return prev;
-      const next = { ...prev, overlayFilters: [...prev.overlayFilters, key] };
+      const filters = new Set([...prev.overlayFilters, ...keys]);
+      if (filters.size === prev.overlayFilters.length) return prev;
+      const next = { ...prev, overlayFilters: [...filters] };
       saveSettings(next).catch((e) => console.warn('[store] save settings failed', e));
       return next;
     });
@@ -328,9 +309,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setStickersPersist((prev) =>
         prev.map((s) => (s.id === id ? { ...s, tags, updatedAt: Date.now() } : s)),
       );
-      tags.forEach((tag) => ensureOverlayFilter(overlayTagKey(tag)));
+      ensureOverlayFilters(tags.map(overlayTagKey));
     },
-    [setStickersPersist, ensureOverlayFilter],
+    [setStickersPersist, ensureOverlayFilters],
   );
 
   const addTagsToStickers = useCallback(
@@ -346,9 +327,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ),
       );
       setTagsPersist((prev) => Array.from(new Set([...prev, ...clean])));
-      clean.forEach((tag) => ensureOverlayFilter(overlayTagKey(tag)));
+      ensureOverlayFilters(clean.map(overlayTagKey));
     },
-    [setStickersPersist, setTagsPersist, ensureOverlayFilter],
+    [setStickersPersist, setTagsPersist, ensureOverlayFilters],
   );
 
   const removeTagsFromStickers = useCallback(
@@ -375,10 +356,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         allTags.includes(trimmed) || stickersRef.current.some((s) => s.tags.includes(trimmed));
       if (exists) return trimmed;
       setTagsPersist((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
-      ensureOverlayFilter(overlayTagKey(trimmed));
+      ensureOverlayFilters([overlayTagKey(trimmed)]);
       return trimmed;
     },
-    [allTags, setTagsPersist, ensureOverlayFilter],
+    [allTags, setTagsPersist, ensureOverlayFilters],
   );
 
   const renameTag = useCallback(
@@ -394,9 +375,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       );
       setTagsPersist((prev) => prev.map((tag) => (tag === oldTag ? trimmed : tag)));
       removeOverlayFilter(overlayTagKey(oldTag));
-      ensureOverlayFilter(overlayTagKey(trimmed));
+      ensureOverlayFilters([overlayTagKey(trimmed)]);
     },
-    [setStickersPersist, setTagsPersist, removeOverlayFilter, ensureOverlayFilter],
+    [setStickersPersist, setTagsPersist, removeOverlayFilter, ensureOverlayFilters],
   );
 
   const deleteTag = useCallback(
@@ -458,11 +439,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const deleteCategory = useCallback(
     (id: string) => {
       setCategoriesPersist((prev) => {
-        const removeIds = new Set(collectCategoryAndDescendants(id, prev));
+        const removeIds = new Set(getDescendantIds(id, prev));
         return prev.filter((c) => !removeIds.has(c.id));
       });
       setStickersPersist((prev) => {
-        const removeIds = new Set(collectCategoryAndDescendants(id, categoriesRef.current));
+        const removeIds = new Set(getDescendantIds(id, categoriesRef.current));
         return prev.map((s) =>
           s.categoryId && removeIds.has(s.categoryId) ? { ...s, categoryId: null, updatedAt: Date.now() } : s,
         );
@@ -480,21 +461,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<StoreValue>(() => {
-    const favorites = stickers.filter((s) => s.isFavorite);
-    const viewCategories: ViewCategory[] = [
-      { id: 'cat__all', name: '全部', icon: 'image-multiple-outline', isVirtual: true },
-      { id: 'cat__recents', name: '最近使用', icon: 'clock-outline', isVirtual: true },
-      { id: 'cat__favorites', name: '收藏', icon: 'star', isVirtual: true },
-      ...categories,
-    ];
     return {
       stickers,
       categories,
       settings,
       loaded,
-      favorites,
       allTags,
-      viewCategories,
       importFromLibrary,
       importFromFiles,
       importFromClipboard,

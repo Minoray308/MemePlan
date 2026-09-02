@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, BackHandler, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useStore } from '../state/StoreProvider';
@@ -17,7 +17,7 @@ import { ImportSourceSheet } from '../components/ImportSourceSheet';
 import { exportStickers } from '../services/shareService';
 import { saveStickersToGallery } from '../services/saveService';
 import { MediaPermissionError, type ImportSourceKey } from '../services/importService';
-import { getChildren, getDescendantIds, getVisibleChildren } from '../utils/category';
+import { getChildren, countStickersByCategory, getVisibleChildren } from '../utils/category';
 import type { Category as CategoryModel } from '../models/types';
 
 type Props = { navigation: TabNavigationProp<'Categories'> };
@@ -51,7 +51,6 @@ export function CategoriesScreen({ navigation }: Props) {
   const [renameTarget, setRenameTarget] = useState<CategoryModel | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CategoryModel | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [showRename, setShowRename] = useState(false);
   const [showDeleteCat, setShowDeleteCat] = useState(false);
   const [showDeleteStickers, setShowDeleteStickers] = useState(false);
   const [showCategoryPick, setShowCategoryPick] = useState(false);
@@ -90,16 +89,7 @@ export function CategoriesScreen({ navigation }: Props) {
     [stickers, selectedIds],
   );
 
-  const countByCategory = useMemo(() => {
-    const map: Record<string, number> = {};
-    stickers.forEach((s) => {
-      if (!s.categoryId) return;
-      getDescendantIds(s.categoryId, categories).forEach((id) => {
-        map[id] = (map[id] || 0) + 1;
-      });
-    });
-    return map;
-  }, [stickers, categories]);
+  const countByCategory = useMemo(() => countStickersByCategory(stickers, categories), [stickers, categories]);
 
   const confirmCreate = useCallback(() => {
     if (!createName.trim()) {
@@ -231,7 +221,6 @@ export function CategoriesScreen({ navigation }: Props) {
   const openRename = useCallback((cat: CategoryModel) => {
     setRenameTarget(cat);
     setRenameValue(cat.name);
-    setShowRename(true);
     setManageTarget(null);
   }, []);
 

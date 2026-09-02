@@ -1,58 +1,106 @@
-import type { Category } from '../models/types';
+import type { Category, Sticker } from '../models/types';
 
 export interface FlattenedCategory {
   category: Category;
   depth: number;
 }
 
-/** Children of a folder. `null` means top-level. */
+function indexChildren(categories: Category[]): Map<string | null, Category[]> {
+  const children = new Map<string | null, Category[]>();
+  for (const category of categories) {
+    const parentId = category.parentId ?? null;
+    const siblings = children.get(parentId);
+    if (siblings) siblings.push(category);
+    else children.set(parentId, [category]);
+  }
+  return children;
+}
+
+/** Children of a folder. null means top-level. */
 export function getChildren(categories: Category[], parentId: string | null): Category[] {
   return categories.filter((c) => (c.parentId ?? null) === parentId);
 }
 
-/** Shows a compact preview until the child-category section is expanded. */
-export function getVisibleChildren(
-  children: Category[],
-  expanded: boolean,
-  collapsedLimit = 4,
-): Category[] {
+export function getVisibleChildren(children: Category[], expanded: boolean, collapsedLimit = 4): Category[] {
   return expanded ? children : children.slice(0, collapsedLimit);
 }
 
-/** Returns the folder id plus all descendant folder ids. */
+/** Index once instead of scanning the full category list for every descendant. */
 export function getDescendantIds(categoryId: string, categories: Category[]): string[] {
-  const result: string[] = [];
+  const children = indexChildren(categories);
+  const visited = new Set<string>();
   const stack = [categoryId];
   while (stack.length) {
-    const id = stack.pop();
-    if (!id || result.includes(id)) continue;
-    result.push(id);
-    getChildren(categories, id).forEach((child) => stack.push(child.id));
+    const id = stack.pop()!;
+    if (!id || visited.has(id)) continue;
+    visited.add(id);
+    for (const child of children.get(id) ?? []) stack.push(child.id);
   }
-  return result;
+  return [...visited];
 }
 
-/** Flattens a category tree depth-first with indentation depth. */
+/** Iterative traversal also tolerates deep or cyclic imported category data. */
 export function flattenCategoryTree(categories: Category[], parentId: string | null = null, depth = 0): FlattenedCategory[] {
+  const children = indexChildren(categories);
   const result: FlattenedCategory[] = [];
-  const children = getChildren(categories, parentId);
-  children.forEach((category) => {
-    result.push({ category, depth });
-    result.push(...flattenCategoryTree(categories, category.id, depth + 1));
-  });
+  const visited = new Set<string>();
+  const stack = (children.get(parentId) ?? []).map(category => ({ category, depth })).reverse();
+  while (stack.length) {
+    const entry = stack.pop()!;
+    if (visited.has(entry.category.id)) continue;
+    visited.add(entry.category.id);
+    result.push(entry);
+    const descendants = children.get(entry.category.id) ?? [];
+    for (let i = descendants.length - 1; i >= 0; i--) {
+      stack.push({ category: descendants[i], depth: entry.depth + 1 });
+    }
+  }
   return result;
 }
 
-/** Returns the folder path from root to the given category, inclusive. */
 export function getCategoryPath(categoryId: string | null, categories: Category[]): Category[] {
-  if (!categoryId) return [];
+  const byId = new Map(categories.map(category => [category.id, category]));
   const result: Category[] = [];
-  let current = categories.find((c) => c.id === categoryId);
-  const guard = new Set<string>();
-  while (current && !guard.has(current.id)) {
-    guard.add(current.id);
-    result.unshift(current);
-    current = current.parentId ? categories.find((c) => c.id === current?.parentId) : undefined;
+  const visited = new Set<string>();
+  let current = categoryId ? byId.get(categoryId) : undefined;
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    result.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
   }
-  return result;
+  return result.reverse();
+}
+
+/** Count direct stickers once, then add each folder's count to its ancestors. */
+export function countStickersByCategory(stickers: Sticker[], categories: Category[]): Record<string, number> {
+  const byId = new Map(categories.map(category => [category.id, category]));
+  const direct = new Map<string, number>();
+  for (const sticker of stickers) {
+    if (sticker.categoryId && byId.has(sticker.categoryId)) {
+      direct.set(sticker.categoryId, (direct.get(sticker.categoryId) ?? 0) + 1);
+    }
+  }
+  const counts: Record<string, number> = Object.create(null);
+  for (const [id, count] of direct) {
+    const visited = new Set<string>();
+    let current = byId.get(id);
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id);
+      counts[current.id] = (counts[current.id] ?? 0) + count;
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+  }
+  return counts;
+}
+
+/** Category matches belong to the sticker itself, not unrelated folders. */
+export function searchStickers(stickers: Sticker[], categories: Category[], query: string): Sticker[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return stickers;
+  const matchingCategories = new Set(categories.filter(c => c.name.toLowerCase().includes(q)).map(c => c.id));
+  return stickers.filter(sticker =>
+    sticker.name.toLowerCase().includes(q) ||
+    sticker.tags.some(tag => tag.toLowerCase().includes(q)) ||
+    (sticker.categoryId != null && matchingCategories.has(sticker.categoryId)),
+  );
 }

@@ -50,8 +50,6 @@ export class MediaPermissionError extends Error {
   }
 }
 
-const EMPTY_RESULT: ImportResult = { imported: [], duplicates: 0, failed: 0 };
-
 /** Opens the system photo library and lets the user pick one or a batch of images. */
 export async function pickImagesFromLibrary(options: ImportOptions = {}): Promise<PickedImage[]> {
   const perm = await requestMediaLibraryPermission();

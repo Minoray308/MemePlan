@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Sticker } from '../models/types';
 import { useTheme } from '../hooks/useTheme';

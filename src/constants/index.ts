@@ -16,10 +16,6 @@ export const STORAGE_KEYS = {
   tags: 'sticker:tags:v1',
 } as const;
 
-export const GRID_ALLOWED_COLUMNS = [3, 4] as const;
-
-export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
-
 export function isImageMime(mime: string | null | undefined): boolean {
   if (!mime) return false;
   const lower = mime.toLowerCase();

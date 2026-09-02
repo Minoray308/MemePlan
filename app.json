@@ -2,7 +2,7 @@
   "expo": {
     "name": "MemePlan",
     "slug": "sticker-manager",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -27,7 +27,8 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
-      ]
+      ],
+      "versionCode": 1000004
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -66,7 +67,8 @@
         }
       ],
       "./plugins/withStickerOverlay",
-      "./plugins/withFileProvider"
+      "./plugins/withFileProvider",
+      "./plugins/withPlainLaunchScreen"
     ],
     "extra": {
       "eas": {

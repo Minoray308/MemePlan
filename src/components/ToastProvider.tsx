@@ -1,6 +1,5 @@
-import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../hooks/useTheme';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -29,8 +28,6 @@ export function useToast(): ToastContextValue {
 let toastId = 0;
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const remove = useCallback((id: number) => {
@@ -41,31 +38,30 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     (text: string, type: ToastType = 'info') => {
       const id = ++toastId;
       setToasts((prev) => [...prev.slice(-2), { id, text, type }]);
-      setTimeout(() => remove(id), 2200);
     },
-    [remove],
+    [],
   );
 
-  const value: ToastContextValue = {
+  const value = useMemo<ToastContextValue>(() => ({
     show,
     success: (t) => show(t, 'success'),
     error: (t) => show(t, 'error'),
     info: (t) => show(t, 'info'),
-  };
+  }), [show]);
 
   return (
     <ToastContext.Provider value={value}>
       {children}
       <View style={[styles.container, { top: '42%' }]} pointerEvents="none">
         {toasts.map((t) => (
-          <ToastItem key={t.id} toast={t} onDone={() => remove(t.id)} />
+          <ToastItem key={t.id} toast={t} onDone={remove} />
         ))}
       </View>
     </ToastContext.Provider>
   );
 }
 
-function ToastItem({ toast, onDone }: { toast: ToastMessage; onDone: () => void }) {
+function ToastItem({ toast, onDone }: { toast: ToastMessage; onDone: (id: number) => void }) {
   const theme = useTheme();
   const opacity = useRef(new Animated.Value(0)).current;
   const translate = useRef(new Animated.Value(8)).current;
@@ -75,10 +71,9 @@ function ToastItem({ toast, onDone }: { toast: ToastMessage; onDone: () => void 
       Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true }),
       Animated.spring(translate, { toValue: 0, speed: 20, bounciness: 4, useNativeDriver: true }),
     ]).start();
-    const timer = setTimeout(onDone, 2200);
+    const timer = setTimeout(() => onDone(toast.id), 2200);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [onDone, opacity, translate, toast.id]);
 
   const bg =
     toast.type === 'success' ? theme.colors.primary : toast.type === 'error' ? theme.colors.danger : '#2B2F38';

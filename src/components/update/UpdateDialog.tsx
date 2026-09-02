@@ -1,4 +1,3 @@
-import React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../../hooks/useTheme';
 import type { AppUpdateInfo } from '../../services/update/updateTypes';

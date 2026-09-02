@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { Sticker } from '../models/types';
 
 /**
@@ -8,8 +8,6 @@ import type { Sticker } from '../models/types';
 export function useSelection() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   const enterSelection = useCallback((id?: string) => {
     setSelectMode(true);
@@ -69,8 +67,8 @@ export function useSelection() {
 
   return {
     selectMode,
-    selectedIds: selected,
-    selectedCount: selected.size,
+    selectedIds,
+    selectedCount: selectedIds.size,
     enterSelection,
     exitSelection,
     toggle,

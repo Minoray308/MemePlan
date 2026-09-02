@@ -1,4 +1,3 @@
-import React from 'react';
 import { ActivityIndicator, Modal, StyleSheet, Text, View } from 'react-native';
 import * as Updates from 'expo-updates';
 import { useTheme } from '../../hooks/useTheme';
