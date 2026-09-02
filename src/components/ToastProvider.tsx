@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, StyleSheet, Text, ToastAndroid, View } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -36,6 +36,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const show = useCallback(
     (text: string, type: ToastType = 'info') => {
+      // Android Modals own separate native windows, above the React view tree.
+      // System text toasts stay visible over those dialogs without taking focus.
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(text, ToastAndroid.SHORT);
+        return;
+      }
       const id = ++toastId;
       setToasts((prev) => [...prev.slice(-2), { id, text, type }]);
     },

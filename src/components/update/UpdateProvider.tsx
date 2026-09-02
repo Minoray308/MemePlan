@@ -202,7 +202,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     [presentPrompt],
   );
 
-  // Cold-start check (once, throttled so we don't hit Cloudflare on every open).
+  // Cold-start check (throttled after successful release checks).
   useEffect(() => {
     const timer = setTimeout(() => runAutoCheck(false), 1500);
     return () => clearTimeout(timer);

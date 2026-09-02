@@ -62,6 +62,10 @@ class StickerOverlayModule : Module() {
       overlay.showItems(json, filtersJson)
     }.runOnQueue(Queues.MAIN)
 
+    AsyncFunction("setThemeColor") { color: String ->
+      overlay.setThemeColor(color)
+    }.runOnQueue(Queues.MAIN)
+
     AsyncFunction("hide") {
       overlay.hide()
     }.runOnQueue(Queues.MAIN)

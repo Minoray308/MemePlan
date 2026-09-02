@@ -8,6 +8,7 @@ import { useToast } from '../components/ToastProvider';
 import { RootStackParamList } from '../navigation/types';
 import { StickerImage } from '../components/StickerImage';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { BulkTagEditor } from '../components/BulkTagEditor';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { Icon, CategoryIcon } from '../components/Icon';
 import { exportSticker } from '../services/shareService';
@@ -27,7 +28,6 @@ export function DetailScreen({ navigation, route }: Props) {
     touchSticker,
     renameSticker,
     setStickerCategory,
-    setStickerTags,
     deleteStickers,
   } = useStore();
 
@@ -37,7 +37,6 @@ export function DetailScreen({ navigation, route }: Props) {
   const [renameText, setRenameText] = useState('');
   const [showCategory, setShowCategory] = useState(false);
   const [showTags, setShowTags] = useState(false);
-  const [tagsText, setTagsText] = useState('');
   const [showDelete, setShowDelete] = useState(false);
   const [sharing, setSharing] = useState(false);
 
@@ -62,24 +61,8 @@ export function DetailScreen({ navigation, route }: Props) {
 
   const openTags = useCallback(() => {
     if (!sticker) return;
-    setTagsText(sticker.tags.join(', '));
     setShowTags(true);
   }, [sticker]);
-
-  const confirmTags = useCallback(() => {
-    if (!sticker) return;
-    const tags = Array.from(
-      new Set(
-        tagsText
-          .split(/[,，]/)
-          .map((t) => t.trim())
-          .filter(Boolean),
-      ),
-    ).slice(0, 10);
-    setStickerTags(sticker.id, tags);
-    setShowTags(false);
-    toast.success('标签已更新');
-  }, [sticker, tagsText, setStickerTags, toast]);
 
   const handleExport = useCallback(async () => {
     if (!sticker) return;
@@ -236,32 +219,7 @@ export function DetailScreen({ navigation, route }: Props) {
         </View>
       </Modal>
 
-      {/* Tags modal */}
-      <Modal transparent visible={showTags} animationType="fade" onRequestClose={() => setShowTags(false)}>
-        <View style={styles.modalOverlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowTags(false)} />
-          <View style={[styles.modalCard, { backgroundColor: theme.colors.card }]}>
-            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>编辑标签</Text>
-            <TextInput
-              value={tagsText}
-              onChangeText={setTagsText}
-              style={[styles.renameInput, { backgroundColor: theme.colors.inputBackground, color: theme.colors.text }]}
-              autoFocus
-              placeholder="用逗号分隔，例如：猫, 搞笑"
-              placeholderTextColor={theme.colors.placeholder}
-              onSubmitEditing={confirmTags}
-            />
-            <View style={styles.modalActions}>
-              <Pressable onPress={() => setShowTags(false)} style={[styles.modalBtn, { backgroundColor: theme.colors.inputBackground }]}>
-                <Text style={{ color: theme.colors.textSecondary }}>取消</Text>
-              </Pressable>
-              <Pressable onPress={confirmTags} style={[styles.modalBtn, { backgroundColor: theme.colors.primary }]}>
-                <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>保存</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <BulkTagEditor visible={showTags} stickerIds={[sticker.id]} onClose={() => setShowTags(false)} />
 
       <CategoryPicker
         visible={showCategory}

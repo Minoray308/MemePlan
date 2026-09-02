@@ -48,6 +48,8 @@ jobs:
           npm run test:app-logic
           npm run test:category-flow
           npm run test:update-logic
+          npm run test:update-network
+          npm run test:overlay-theme
 
       - name: Resolve release metadata
         env:
@@ -92,9 +94,10 @@ jobs:
           else
             printf 'MemePlan %s\n' "$VERSION" > release-notes.md
           fi
+          node scripts/create-update-manifest.cjs "$VERSION" "$APK_NAME" release-notes.md > update.json
           if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "v$VERSION" "$APK_NAME" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "v$VERSION" "$APK_NAME" update.json --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "MemePlan v$VERSION" --notes-file release-notes.md
           else
-            gh release create "v$VERSION" "$APK_NAME" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "MemePlan v$VERSION" --notes-file release-notes.md
+            gh release create "v$VERSION" "$APK_NAME" update.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "MemePlan v$VERSION" --notes-file release-notes.md
           fi

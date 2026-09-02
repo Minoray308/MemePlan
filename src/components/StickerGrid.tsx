@@ -140,6 +140,7 @@ export function StickerGrid(props: Props) {
   return (
     <View style={styles.wrap} {...panResponder.panHandlers}>
       <FlatList
+        keyboardShouldPersistTaps="handled"
         data={stickers}
         key={safeColumns}
         numColumns={safeColumns}

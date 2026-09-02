@@ -12,12 +12,14 @@ import { EmptyState } from '../components/EmptyState';
 import { Icon, CategoryIcon } from '../components/Icon';
 import { SelectionBar } from '../components/SelectionBar';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { NameInputForm } from '../components/NameInputForm';
+import { SearchInput } from '../components/SearchInput';
 import { CategoryPicker } from '../components/CategoryPicker';
 import { ImportSourceSheet } from '../components/ImportSourceSheet';
 import { exportStickers } from '../services/shareService';
 import { saveStickersToGallery } from '../services/saveService';
 import { MediaPermissionError, type ImportSourceKey } from '../services/importService';
-import { getChildren, countStickersByCategory, getVisibleChildren } from '../utils/category';
+import { getChildren, countStickersByCategory, getVisibleChildren, searchCategories, getCategoryPath, getDescendantIds } from '../utils/category';
 import type { Category as CategoryModel } from '../models/types';
 
 type Props = { navigation: TabNavigationProp<'Categories'> };
@@ -45,6 +47,7 @@ export function CategoriesScreen({ navigation }: Props) {
   const { selectMode, selectedIds, exitSelection } = selection;
 
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [categoryQuery, setCategoryQuery] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
   const [manageTarget, setManageTarget] = useState<CategoryModel | null>(null);
@@ -70,9 +73,14 @@ export function CategoriesScreen({ navigation }: Props) {
     () => (currentFolderId ? getChildren(categories, currentFolderId) : []),
     [categories, currentFolderId],
   );
+  const searchResults = useMemo(() => {
+    const scope = currentFolderId ? new Set(getDescendantIds(currentFolderId, categories).slice(1)) : null;
+    return searchCategories(scope ? categories.filter(c => scope.has(c.id)) : categories, categoryQuery);
+  }, [categories, currentFolderId, categoryQuery]);
+  const displayedTopLevel = categoryQuery.trim() ? searchResults : topLevel;
   const visibleChildFolders = useMemo(
-    () => getVisibleChildren(childFolders, childrenExpanded),
-    [childFolders, childrenExpanded],
+    () => categoryQuery.trim() ? searchResults : getVisibleChildren(childFolders, childrenExpanded),
+    [childFolders, childrenExpanded, categoryQuery, searchResults],
   );
 
   useEffect(() => {
@@ -200,10 +208,12 @@ export function CategoriesScreen({ navigation }: Props) {
   }, [selectedStickers, touchSticker, toast, exitSelection]);
 
   const openCategory = useCallback((cat: CategoryModel) => {
+    setCategoryQuery('');
     setCurrentFolderId(cat.id);
   }, []);
 
   const goBack = useCallback(() => {
+    setCategoryQuery('');
     setCurrentFolderId(currentCategory?.parentId ?? null);
   }, [currentCategory]);
 
@@ -244,6 +254,8 @@ export function CategoriesScreen({ navigation }: Props) {
           }
         />
 
+        <SearchInput value={categoryQuery} onChangeText={setCategoryQuery} placeholder="搜索此文件夹下的分类" />
+
         <View style={styles.gridWrap}>
           <StickerGrid
             stickers={directStickers}
@@ -262,7 +274,7 @@ export function CategoriesScreen({ navigation }: Props) {
               <View style={styles.folderHeader}>
                 <View style={styles.sectionHeading}>
                   <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>子分类</Text>
-                  {childFolders.length > 4 && (
+                  {!categoryQuery.trim() && childFolders.length > 4 && (
                     <Pressable onPress={() => setChildrenExpanded((expanded) => !expanded)} hitSlop={8}>
                       <Text style={[styles.expandText, { color: theme.colors.primary }]}>
                         {childrenExpanded ? '收起' : `展开全部 (${childFolders.length})`}
@@ -278,11 +290,11 @@ export function CategoriesScreen({ navigation }: Props) {
                       style={[styles.folderChip, { backgroundColor: theme.colors.card, borderColor: theme.colors.cardBorder }]}
                     >
                       <CategoryIcon icon={child.icon} size={18} />
-                      <Text style={[styles.folderChipText, { color: theme.colors.text }]}>{child.name}</Text>
+                      <Text style={[styles.folderChipText, { color: theme.colors.text }]}>{categoryQuery.trim() ? getCategoryPath(child.id, categories).map(c => c.name).join(' / ') : child.name}</Text>
                     </Pressable>
                   ))}
-                  {childFolders.length === 0 && (
-                    <Text style={{ color: theme.colors.textMuted, paddingVertical: 12 }}>暂无子分类</Text>
+                  {visibleChildFolders.length === 0 && (
+                    <Text style={{ color: theme.colors.textMuted, paddingVertical: 12 }}>{categoryQuery.trim() ? '没有匹配的分类' : '暂无子分类'}</Text>
                   )}
                 </View>
                 <View style={styles.folderActions}>
@@ -332,7 +344,7 @@ export function CategoriesScreen({ navigation }: Props) {
         <CategoryPicker
           visible={showCategoryPick}
           categories={categories}
-          selectedId={null}
+          selectedId={selectedStickers.length > 0 && selectedStickers.every(s => s.categoryId === selectedStickers[0].categoryId) ? selectedStickers[0].categoryId : null}
           onApply={confirmApplyCategory}
           onClose={() => setShowCategoryPick(false)}
           title="移动到分类"
@@ -421,13 +433,15 @@ export function CategoriesScreen({ navigation }: Props) {
         }
       />
 
+      <SearchInput value={categoryQuery} onChangeText={setCategoryQuery} placeholder="搜索全部分类（含子分类）" />
+
       {!loaded ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.colors.primary} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.list}>
-          {topLevel.map((c) => (
+        <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
+          {displayedTopLevel.map((c) => (
             <Pressable
               key={c.id}
               onPress={() => openCategory(c)}
@@ -439,6 +453,7 @@ export function CategoriesScreen({ navigation }: Props) {
               </View>
               <View style={styles.catInfo}>
                 <Text style={[styles.catName, { color: theme.colors.text }]}>{c.name}</Text>
+                {!!categoryQuery.trim() && <Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>{getCategoryPath(c.id, categories).map(folder => folder.name).join(' / ')}</Text>}
                 <Text style={[styles.catCount, { color: theme.colors.textMuted }]}>
                   {countByCategory[c.id] || 0} 张表情 · {getChildren(categories, c.id).length} 个子分类
                 </Text>
@@ -446,8 +461,8 @@ export function CategoriesScreen({ navigation }: Props) {
               <Text style={{ color: theme.colors.textMuted }}>›</Text>
             </Pressable>
           ))}
-          {topLevel.length === 0 && (
-            <EmptyState icon='folder-multiple-outline' title="还没有分类" message="点击右上角新建一个文件夹分类吧" />
+          {displayedTopLevel.length === 0 && (
+            <EmptyState icon='folder-multiple-outline' title={categoryQuery.trim() ? "没有匹配的分类" : "还没有分类"} message={categoryQuery.trim() ? "试试其他关键词" : "点击右上角新建一个文件夹分类吧"} />
           )}
         </ScrollView>
       )}
@@ -531,32 +546,10 @@ function CreateCategoryModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const theme = useTheme();
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onCancel}>
-      <View style={styles.modalOverlay}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
-        <View style={[styles.modalCard, { backgroundColor: theme.colors.card }]}>
-          <Text style={[styles.modalTitle, { color: theme.colors.text }]}>{title}</Text>
-          <TextInput
-            value={value}
-            onChangeText={onChange}
-            style={[styles.input, { backgroundColor: theme.colors.inputBackground, color: theme.colors.text }]}
-            placeholder={placeholder}
-            placeholderTextColor={theme.colors.placeholder}
-            autoFocus
-            onSubmitEditing={onConfirm}
-          />
-          <View style={styles.modalActions}>
-            <Pressable onPress={onCancel} style={[styles.modalBtn, { backgroundColor: theme.colors.inputBackground }]}>
-              <Text style={{ color: theme.colors.textSecondary }}>取消</Text>
-            </Pressable>
-            <Pressable onPress={onConfirm} style={[styles.modalBtn, { backgroundColor: theme.colors.primary }]}>
-              <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>创建</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
+      <NameInputForm title={title} value={value} onChange={onChange} placeholder={placeholder}
+        onCancel={onCancel} onConfirm={onConfirm} />
     </Modal>
   );
 }

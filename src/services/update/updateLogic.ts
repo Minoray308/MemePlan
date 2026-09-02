@@ -171,3 +171,38 @@ export function parseServerUpdateInfoRaw(raw: unknown): ServerUpdateInfo {
         : undefined,
   };
 }
+/** Normalizes GitHub tag_name, body and APK assets into the app model. */
+export function parseGithubReleaseRaw(raw: unknown): ServerUpdateInfo {
+  if (typeof raw !== 'object' || raw === null) throw new Error('invalid release');
+  const release = raw as Record<string, unknown>;
+  if (typeof release.tag_name !== 'string' || !/^v?\d+\.\d+\.\d+$/.test(release.tag_name) || release.draft === true || release.prerelease === true) throw new Error('invalid release');
+  const assets = Array.isArray(release.assets) ? release.assets : [];
+  const apk = assets
+    .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+    .filter((x) => typeof x.name === 'string' && /\.apk$/i.test(x.name))
+    .find((x) => typeof x.browser_download_url === 'string');
+  return {
+    platform: 'android',
+    latestVersion: stripLeadingV(release.tag_name),
+    minimumVersion: '0.0.0',
+    forceUpdate: false,
+    apkUrl: apk && typeof apk.browser_download_url === 'string' ? apk.browser_download_url : undefined,
+    apkName: apk && typeof apk.name === 'string' ? apk.name : undefined,
+    sha256: apk && typeof apk.digest === 'string' && /^sha256:[a-fA-F0-9]{64}$/.test(apk.digest)
+      ? apk.digest.slice(7).toLowerCase() : undefined,
+    releaseNotes: typeof release.body === 'string' && release.body.trim() ? [release.body] : undefined,
+    publishedAt: typeof release.published_at === 'string' ? release.published_at : undefined,
+    releaseUrl: typeof release.html_url === 'string' ? release.html_url : undefined,
+  };
+}
+
+/** Release asset metadata must identify an HTTPS APK and its checksum. */
+export function parseReleaseManifest(raw: unknown): ServerUpdateInfo {
+  const info = parseServerUpdateInfoRaw(raw);
+  if (!/^\d+\.\d+\.\d+$/.test(info.latestVersion) || !info.apkUrl ||
+      !isHttpsUrl(info.apkUrl) || !info.apkName?.endsWith('.apk') || !info.sha256) {
+    throw new Error('invalid release manifest');
+  }
+  const releaseUrl = (raw as Record<string, unknown>).releaseUrl;
+  return { ...info, releaseUrl: typeof releaseUrl === 'string' && isHttpsUrl(releaseUrl) ? releaseUrl : undefined };
+}

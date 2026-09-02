@@ -42,3 +42,6 @@ yarn-error.*
 
 # local release artifacts
 releases/
+
+# local native module build outputs
+/modules/*/android/build/

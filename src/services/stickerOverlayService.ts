@@ -68,10 +68,15 @@ export const StickerOverlayService = {
     stickers: Sticker[],
     categoryNames?: Record<string, string>,
     filters?: string[],
+    primaryColor?: string,
   ): Promise<boolean> {
     if (!StickerOverlayService.isAvailable()) return false;
     const items = overlayItemsFor(stickers, categoryNames);
-    return StickerOverlay.show(items, filters);
+    return StickerOverlay.show(items, filters, primaryColor);
+  },
+
+  setThemeColor(color: string): Promise<void> {
+    return StickerOverlay.setThemeColor(color);
   },
 
   hideOverlay(): Promise<void> {

@@ -141,13 +141,13 @@ export function SettingsScreen() {
               return (
                 <Pressable
                   key={preset.color}
+                  accessibilityRole="radio"
+                  accessibilityLabel={preset.name}
+                  accessibilityState={{ checked: active }}
                   onPress={() => setThemeColor(preset.color)}
                   style={[styles.colorItem, { backgroundColor: theme.colors.inputBackground }]}
                 >
                   <View style={[styles.colorDot, { backgroundColor: preset.color }]} />
-                  <Text style={[styles.colorName, { color: active ? theme.colors.primary : theme.colors.textSecondary }]}>
-                    {preset.name}
-                  </Text>
                   {active && (
                     <View style={[styles.colorCheck, { backgroundColor: theme.colors.primary }]}>
                       <Text style={styles.colorCheckText}>✓</Text>
@@ -182,7 +182,7 @@ export function SettingsScreen() {
             </Pressable>
           </View>
           <Text style={[styles.hint, { color: theme.colors.textMuted }]}>
-            点击数字可直接输入列数，范围 {MIN_COLUMNS}～{MAX_COLUMNS}，默认 3 列。
+            点击数字可直接输入列数，范围 {MIN_COLUMNS}～{MAX_COLUMNS}。
           </Text>
         </View>
 
@@ -448,8 +448,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     position: 'relative',
   },
-  colorDot: { width: 26, height: 26, borderRadius: 13, marginBottom: 6 },
-  colorName: { fontSize: 11, fontWeight: '600' },
+  colorDot: { width: 28, height: 28, borderRadius: 14 },
   colorCheck: {
     position: 'absolute',
     top: 4,

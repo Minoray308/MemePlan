@@ -53,3 +53,14 @@ test('tree flattening preserves depth and handles corrupt cycles', () => {
   assert.deepEqual(category.flattenCategoryTree(folders).map(({category:c, depth}) => [c.id, depth]), [['parent',0],['child',1],['other',0]]);
   assert.deepEqual(category.flattenCategoryTree([folder('a', 'b'), folder('b', 'a')], 'a').map(({category:c}) => c.id), ['b','a']);
 });
+
+test('folder search finds nested folders and preserves path context', () => {
+  assert.deepEqual(category.searchCategories(folders, ' 猫 ').map(c => c.id), ['child']);
+  assert.deepEqual(category.searchCategories(folders, '不存在'), []);
+  assert.deepEqual(category.getCategoryPath('child', folders).map(c => c.name), ['动物', '猫']);
+});
+test('picker search reveals nested matches even when ancestors are collapsed', () => {
+  assert.deepEqual(category.getPickerRows(folders, new Set(), '猫').map(r => r.category.id), ['child']);
+  assert.deepEqual(category.getPickerRows(folders, new Set(), '').map(r => r.category.id), ['parent', 'other']);
+  assert.deepEqual(category.getPickerRows(folders, new Set(['parent']), '').map(r => r.category.id), ['parent', 'child', 'other']);
+});

@@ -1,5 +1,6 @@
 /**
- * Types for the update system. The source of truth is the GitHub Releases\r`n * API (see src/services/update/updateApi.ts); a newer build is
+ * Types for the update system. The source of truth is the GitHub Releases
+ * API (see src/services/update/updateApi.ts); a newer build is
  * decided by numeric semver comparison of the running versionName against the
  * API's latest/minimum versions. The latest release APK is downloaded through the native Android installer.
  */
@@ -35,6 +36,7 @@ export type UpdateCheckOutcome = 'latest' | 'ota' | 'apk' | 'unavailable' | 'err
 
 /** Stable error codes surfaced to the UI with a friendly message. */
 export type UpdateCheckErrorCode =
+  | 'rate_limit'
   | 'network'
   | 'timeout'
   | 'http'
@@ -45,6 +47,8 @@ export type UpdateCheckErrorCode =
 /** Friendly Chinese message for each update-check error code. */
 export function defaultUpdateErrorMessage(code: UpdateCheckErrorCode): string {
   switch (code) {
+    case 'rate_limit':
+      return '更新接口限流，请稍后重试或切换 VPN 节点';
     case 'network':
       return '网络连接异常，请检查网络后重试';
     case 'timeout':

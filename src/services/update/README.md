@@ -32,3 +32,20 @@ memeplan-1.0.3.apk
 ```
 
 不再需要 Cloudflare Worker/R2 的版本元数据作为客户端更新源。
+
+## 网络兼容与错误诊断
+
+GitHub REST API 的匿名额度按出口 IP 共享。VPN 节点可能因为其他用户的请求而返回
+403（配额耗尽/访问受限）或 429。检查接口 api.github.com 与 APK 下载域名的连通性
+也可能不同，客户端不能仅凭是否使用 VPN 判断网络可用性。
+
+检查接口失败后，客户端会尝试同仓库的公开发行附件：
+https://github.com/<owner>/<repo>/releases/latest/download/update.json
+
+发布工作流通过 scripts/create-update-manifest.cjs 生成该附件，与 APK 一起上传。
+附件包含版本、下载地址、更新说明及真实 APK 的 SHA-256。新流程发布之前的版本可能
+没有该附件；两条路径都失败时保留原始接口的明确错误原因。
+
+成功的检查才记入 6 小时自动检查缓存；失败后切换网络可再次检查。并发检查共享真实结果，
+不会因为已有请求正在进行而误报最新版。单次请求的超时覆盖响应正文读取，主接口和备用
+接口各有 10 秒上限。不在客户端嵌入 GitHub Token，也不关闭 TLS 验证。

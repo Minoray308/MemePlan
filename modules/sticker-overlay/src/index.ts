@@ -37,6 +37,7 @@ declare class NativeStickerOverlay extends NativeModule<StickerOverlayEvents> {
   canDrawOverlays(): boolean;
   openOverlaySettings(): Promise<void>;
   show(itemsJson: string, filtersJson: string): Promise<void>;
+  setThemeColor?(color: string): Promise<void>;
   hide(): Promise<void>;
   collapse(): Promise<void>;
   expand(): Promise<void>;
@@ -66,15 +67,20 @@ export const StickerOverlay = {
     return native ? native.openOverlaySettings() : Promise.resolve();
   },
 
-  async show(items: StickerOverlayItem[], filters: string[] = []): Promise<boolean> {
+  async show(items: StickerOverlayItem[], filters: string[] = [], primaryColor?: string): Promise<boolean> {
     if (!native) return false;
     try {
+      if (primaryColor) await StickerOverlay.setThemeColor(primaryColor);
       await native.show(JSON.stringify(items), JSON.stringify(filters));
       return true;
     } catch (e) {
       console.warn('[StickerOverlay] show failed', e);
       return false;
     }
+  },
+
+  setThemeColor(color: string): Promise<void> {
+    return native?.setThemeColor?.(color) ?? Promise.resolve();
   },
 
   hide(): Promise<void> {

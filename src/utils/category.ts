@@ -104,3 +104,19 @@ export function searchStickers(stickers: Sticker[], categories: Category[], quer
     (sticker.categoryId != null && matchingCategories.has(sticker.categoryId)),
   );
 }
+
+/** Search every level; callers display the full path to distinguish duplicate names. */
+export function searchCategories(categories: Category[], query: string): Category[] {
+  const q = query.trim().toLowerCase();
+  return q ? categories.filter(c => c.name.toLowerCase().includes(q)) : categories;
+}
+
+export function getPickerRows(categories: Category[], expandedIds: Set<string>, query: string) {
+  const q = query.trim().toLowerCase();
+  const parents = new Set(categories.map(c => c.parentId));
+  return flattenCategoryTree(categories)
+    .filter(({ category }) => q
+      ? category.name.toLowerCase().includes(q)
+      : getCategoryPath(category.id, categories).slice(0, -1).every(c => expandedIds.has(c.id)))
+    .map(row => ({ ...row, hasChildren: parents.has(row.category.id) }));
+}

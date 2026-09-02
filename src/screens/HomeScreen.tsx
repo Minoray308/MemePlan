@@ -391,7 +391,7 @@ export function HomeScreen({ navigation }: Props) {
             ? OVERLAY_FILTER_OPTIONS.some((o) => o.key === key)
             : activeTags.has(tag);
         });
-        const ok = await StickerOverlayService.showOverlay(stickersForOverlay, categoryNames, safeFilters);
+        const ok = await StickerOverlayService.showOverlay(stickersForOverlay, categoryNames, safeFilters, theme.colors.primary);
         if (ok) {
           setOverlayOpen(true);
           if (settings.exitAfterOverlay) {
@@ -407,7 +407,7 @@ export function HomeScreen({ navigation }: Props) {
         toast.error('打开悬浮窗失败');
       }
     },
-    [toast, requestOverlayPermission, categoryNames, settings.overlayFilters, settings.exitAfterOverlay, allTags, stickers],
+    [theme.colors.primary, toast, requestOverlayPermission, categoryNames, settings.overlayFilters, settings.exitAfterOverlay, allTags, stickers],
   );
 
   const handleToggleOverlay = useCallback(() => {
@@ -490,7 +490,8 @@ export function HomeScreen({ navigation }: Props) {
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       <ScreenHeader
-        title="表情包"
+        title={'Meme\nPlan'}
+        titleStyle={styles.brandTitle}
         subtitle={`共 ${stickers.length} 张`}
         right={
           <>
@@ -623,7 +624,7 @@ export function HomeScreen({ navigation }: Props) {
       <CategoryPicker
         visible={showCategory}
         categories={categories}
-        selectedId={null}
+        selectedId={selectedStickers.length > 0 && selectedStickers.every(s => s.categoryId === selectedStickers[0].categoryId) ? selectedStickers[0].categoryId : null}
         onApply={applyCategory}
         onClose={() => setShowCategory(false)}
         title="设置所选表情的分类"
@@ -770,6 +771,7 @@ export function HomeScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  brandTitle: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 22, fontWeight: '700', lineHeight: 24, letterSpacing: 0, includeFontPadding: false },
   root: { flex: 1 },
   importBtn: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999 },
   overlayBtn: { paddingHorizontal: 11, paddingVertical: 9, borderRadius: 999 },

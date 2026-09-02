@@ -6,6 +6,10 @@ export const GITHUB_REPOSITORY =
 export const GITHUB_LATEST_RELEASE_URL =
   `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest`;
 
+/** Public release asset fallback, independent of REST API request quotas. */
+export const GITHUB_LATEST_MANIFEST_URL =
+  `https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/update.json`;
+
 /** Network timeout (ms) for the release check request. */
 export const UPDATE_API_TIMEOUT_MS = 10_000;
 

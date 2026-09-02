@@ -107,6 +107,7 @@ class StickerOverlayWindow(
   private var items: List<StickerOverlayItem> = emptyList()
   private var searchText = ""
   private var selectedFilter = FILTER_ALL
+  private var filterAccentColor = COLOR_PRIMARY
   private var lastTappedPath: String? = null
   private var pendingTemp: TempRecord? = null
   private var isCollapsed = false
@@ -141,6 +142,13 @@ class StickerOverlayWindow(
   }
 
   // region Public API (invoked from the module, on the main thread)
+
+  fun setThemeColor(color: String) {
+    val parsed = try { Color.parseColor(color) } catch (_: IllegalArgumentException) { return }
+    if (parsed == filterAccentColor) return
+    filterAccentColor = parsed
+    renderChips()
+  }
 
   fun showItems(json: String, filtersJson: String) {
     items = parseItems(json)
@@ -500,7 +508,7 @@ class StickerOverlayWindow(
         setTextColor(if (selected) Color.WHITE else TEXT_SECONDARY)
         typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         setPadding(dp(ctx, 10), dp(ctx, 5), dp(ctx, 10), dp(ctx, 5))
-        background = roundedRect(ctx, if (selected) COLOR_PRIMARY else COLOR_BTN, dp(ctx, 9).toFloat())
+        background = roundedRect(ctx, if (selected) filterAccentColor else COLOR_BTN, dp(ctx, 9).toFloat())
         setOnClickListener {
           selectedFilter = if (selected) FILTER_ALL else key
           renderChips()
