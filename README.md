@@ -1,60 +1,17 @@
 # MemePlan（表情包管理工具）
+简介：目前，我的绿泡泡收藏的表情包数量已经超过了300个，每次寻找查阅都很困难。且绿泡泡和企鹅的表情包数据无法互通，于是，MemePlan诞生了
+这是一个表情包管理工具，可以导入并理表情包，为其打标签，分类等，也支持快捷发送
+但按某公司的尿性，我无法加入一键从社交软件导入表情包的功能，暂只支持从相册导入
+暂只支持最新版安卓
 
-基于 Expo SDK 57 / React Native 0.86 的 Android 表情包管理 App，支持导入、分类、标签、收藏、搜索、导出与悬浮窗发送。
+下载：在release中选择最新版下载并安装即可
 
-## 更新系统
 
-客户端采用与 Kazumi 类似的 GitHub Releases 检查方式：请求仓库的 `releases/latest`，读取 Release 的 tag、更新说明和 APK asset；发现 tag 高于当前版本时，下载 APK 并交给 Android 系统安装器。
 
-- 默认更新仓库：`Minoray308/MemePlan`
-- 可用 `EXPO_PUBLIC_GITHUB_REPOSITORY=owner/repo` 覆盖
-- 自动检查：冷启动/回到前台时触发，6 小时内不重复请求
-- 设置页手动“检查更新”：立即请求，绕过自动检查缓存
-- Release body 是更新日志；Release 必须上传至少一个 `.apk`
-- Expo Go 不包含项目的原生 APK 安装模块，因此不能用于完整验证更新安装流程
+快捷发送方法&原理：
+在主菜单选择“悬浮按钮”，按自己的喜好选择显示在悬浮窗口上的标签/分类，找到想发送的表情包后，点击该表情包，然后点击在社交软件的聊天框右侧的“+”，表情包会弹出，点击该表情包即可，最后按悬浮窗的“已发送”
+原理：社交app的功能：当相册存入了新照片后点击“+”后，会自动询问是否发送该图片。MemePlan基于这个特性，将每次想发送的表情包存入相册，使用完毕后删除，即快捷发送。
 
-客户端代码和发布要求见 [`src/services/update/README.md`](src/services/update/README.md)。
-
-## 本地开发
-
-```powershell
-npm install
-npm start
-```
-
-## 不使用 Expo Go 的 Android 打包
-
-本地原生构建：
-
-```powershell
-npx expo prebuild --platform android --no-install
-cd android
-./gradlew.bat assembleRelease
-```
-
-APK 位于 `android/app/build/outputs/apk/release/app-release.apk`。
-
-也可以使用 EAS 生成 APK（仍然不是 Expo Go）：
-
-```powershell
-npx eas build -p android --profile production-apk
-```
-
-## 发布新版本（开发者）
-
-1. 修改 `app.json` 中的 `expo.version`，例如 `1.0.3`。
-2. 使用上面的原生构建命令生成 APK。
-3. 在 GitHub 仓库创建 Release，Tag 使用 `v1.0.3`，并将 APK 作为 asset 上传；Release 描述填写更新日志。
-4. 用户打开 App 或在设置页手动检查时，会从 GitHub 读取这个 Release。
-
-也可以在 GitHub Actions 中运行 `Build & Publish Android APK Release`，填写版本号和可选更新说明，工作流会自动构建并创建 GitHub Release。工作流文件为 [`.github/workflows/build-and-upload-apk.yml`](.github/workflows/build-and-upload-apk.yml)。
-
-## 校验
-
-```powershell
-npm run typecheck
-npm run test:update-logic
-```
 
 ## 许可证
 
