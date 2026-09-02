@@ -57,6 +57,12 @@ jobs:
       - name: Generate native project
         run: npx expo prebuild --platform android --no-install
 
+      - name: Restore signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/debug.keystore
       - name: Build release APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon --max-workers=2 -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
@@ -68,7 +74,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$VERSION" "dist-$APK_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "MemePlan v$VERSION" \
-            --notes "${{ inputs.notes || format('MemePlan {0}', inputs.version) }}"
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" "dist-$APK_NAME" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --title "MemePlan v$VERSION" --notes "${{ inputs.notes || format('MemePlan {0}', inputs.version) }}"
+          else
+            gh release create "v$VERSION" "dist-$APK_NAME" --repo "$GITHUB_REPOSITORY" --title "MemePlan v$VERSION" --notes "${{ inputs.notes || format('MemePlan {0}', inputs.version) }}"
+          fi
