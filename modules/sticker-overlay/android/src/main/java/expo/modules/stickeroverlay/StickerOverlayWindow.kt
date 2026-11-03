@@ -105,6 +105,7 @@ class StickerOverlayWindow(
   private var chipsRow: LinearLayout? = null
 
   private var items: List<StickerOverlayItem> = emptyList()
+  private var compactMode = false
   private var searchText = ""
   private var selectedFilter = FILTER_ALL
   private var filterAccentColor = COLOR_PRIMARY
@@ -151,10 +152,26 @@ class StickerOverlayWindow(
   }
 
   fun showItems(json: String, filtersJson: String) {
+    val wasCompact = compactMode
     items = parseItems(json)
+    compactMode = items.size == 1
+    if (wasCompact != compactMode) {
+      clearSearchFocus()
+      searchText = ""
+      selectedFilter = FILTER_ALL
+      searchField = null
+      chipsRow = null
+      rootView?.let { root ->
+        expandedCard?.let { root.removeView(it) }
+        expandedCard = buildExpandedCard(context ?: return)
+        root.addView(expandedCard, 0, FrameLayout.LayoutParams(
+          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+      }
+    }
     val enabledFilters = parseFilters(filtersJson)
     chipDefs = buildChips(enabledFilters)
-    if (selectedFilter != FILTER_ALL && selectedFilter !in chipDefs.map { it.first }) {
+    if (compactMode || (selectedFilter != FILTER_ALL && selectedFilter !in chipDefs.map { it.first })) {
       selectedFilter = FILTER_ALL
     }
     val ctx = context ?: return
@@ -299,7 +316,13 @@ class StickerOverlayWindow(
       body.addView(textView(ctx, "没有找到表情", 13f, TEXT_SECONDARY, Typeface.NORMAL))
       return
     }
-    if (active) {
+    if (compactMode) {
+      body.addView(stickerThumb(ctx, results.first()).apply {
+        scaleType = ImageView.ScaleType.FIT_CENTER
+      }, LinearLayout.LayoutParams(dp(ctx, 56), dp(ctx, 56)).apply {
+        gravity = Gravity.CENTER_HORIZONTAL
+      })
+    } else if (active) {
       body.addView(
         textView(ctx, "找到 ${results.size} 个表情", 11f, TEXT_SECONDARY, Typeface.NORMAL),
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -362,7 +385,7 @@ class StickerOverlayWindow(
     val params = layoutParams ?: return
     if (isCollapsed) return
     val active = searchText.isNotBlank() || selectedFilter != FILTER_ALL
-    params.width = if (active) expandedWidth(ctx) else smallWidth(ctx)
+    params.width = if (!compactMode && active) expandedWidth(ctx) else smallWidth(ctx)
     params.height = WindowManager.LayoutParams.WRAP_CONTENT
     try {
       windowManager?.updateViewLayout(rootView, params)
@@ -372,7 +395,7 @@ class StickerOverlayWindow(
   }
 
   private fun smallWidth(ctx: Context): Int {
-    return minOf(dp(ctx, 250), ctx.resources.displayMetrics.widthPixels - dp(ctx, 24))
+    return minOf(dp(ctx, if (compactMode) 168 else 250), ctx.resources.displayMetrics.widthPixels - dp(ctx, 24))
   }
 
   private fun expandedWidth(ctx: Context): Int {
@@ -387,7 +410,7 @@ class StickerOverlayWindow(
     val root = FrameLayout(ctx)
     val card = buildExpandedCard(ctx)
     val bubble = buildBubble(ctx)
-    root.addView(card, FrameLayout.LayoutParams(smallWidth(ctx), ViewGroup.LayoutParams.WRAP_CONTENT))
+    root.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     root.addView(bubble, FrameLayout.LayoutParams(dp(ctx, 56), dp(ctx, 56)))
     bubble.visibility = View.GONE
     expandedCard = card
@@ -398,7 +421,8 @@ class StickerOverlayWindow(
   private fun buildExpandedCard(ctx: Context): LinearLayout {
     val card = LinearLayout(ctx).apply {
       orientation = LinearLayout.VERTICAL
-      setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 12), dp(ctx, 12))
+      val padding = dp(ctx, if (compactMode) 6 else 12)
+      setPadding(padding, dp(ctx, if (compactMode) 4 else 10), padding, padding)
       elevation = dp(ctx, 12).toFloat()
       background = roundedRect(ctx, COLOR_BG, dp(ctx, 16).toFloat())
     }
@@ -413,7 +437,7 @@ class StickerOverlayWindow(
       setPadding(0, 0, dp(ctx, 8), 0)
     }
     titles.addView(
-      textView(ctx, "快捷发送", 15f, Color.WHITE, Typeface.BOLD),
+      textView(ctx, if (compactMode) "发送" else "快捷发送", if (compactMode) 12f else 15f, Color.WHITE, Typeface.BOLD),
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     )
     attachDrag(header)
@@ -428,6 +452,14 @@ class StickerOverlayWindow(
       LinearLayout.LayoutParams(dp(ctx, 30), dp(ctx, 30)).apply { marginStart = dp(ctx, 4) }
     )
     card.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+    if (compactMode) {
+      bodyContainer = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+      card.addView(bodyContainer, LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+      ))
+      return card
+    }
 
     // Search box.
     val searchRow = LinearLayout(ctx).apply {
@@ -585,13 +617,20 @@ class StickerOverlayWindow(
     val ctx = context ?: return
     val body = bodyContainer ?: return
     body.removeAllViews()
-    body.addView(textView(ctx, "正在保存到相册…", 14f, Color.WHITE, Typeface.NORMAL))
+    body.addView(textView(ctx, if (compactMode) "保存中…" else "正在保存到相册…", 14f, Color.WHITE, Typeface.NORMAL))
   }
 
   private fun showSavedState() {
     val ctx = context ?: return
     val body = bodyContainer ?: return
     body.removeAllViews()
+    if (compactMode) {
+      val row = buttonRow(ctx)
+      row.addView(button(ctx, "已发送", COLOR_PRIMARY) { onSentConfirmed() })
+      row.addView(button(ctx, "重存", COLOR_BTN) { onResave() })
+      body.addView(row)
+      return
+    }
     body.addView(textView(ctx, "就绪！", 15f, Color.WHITE, Typeface.BOLD))
     body.addView(
       textView(ctx, "点击社交软件右下角的‘+’发送", 12f, TEXT_SECONDARY, Typeface.NORMAL),
@@ -624,7 +663,7 @@ class StickerOverlayWindow(
     )
     val row = buttonRow(ctx)
     row.addView(button(ctx, "重试", COLOR_PRIMARY) { lastTappedPath?.let { onStickerTapped(it) } })
-    row.addView(button(ctx, "退出", COLOR_CLOSE) { closeWindow() })
+    if (!compactMode) row.addView(button(ctx, "退出", COLOR_CLOSE) { closeWindow() })
     body.addView(
       row,
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
